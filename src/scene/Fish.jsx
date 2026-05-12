@@ -7,6 +7,7 @@ import {
   sampleCurrentY,
   sampleCurrentZ,
 } from './currents.js';
+import { sampleBeamVolumeFactorMutable } from './beamVolume.js';
 
 /**
  * Single fish: a textured plane.
@@ -59,6 +60,7 @@ export default function Fish({
   tint = [1, 1, 1],
   fishId = 0,
   scatterCtx = null,
+  lightBeam = null,
 }) {
   const group = useRef();
   const body = useRef();
@@ -115,6 +117,15 @@ export default function Fish({
     progress: 0,
     duration: 0.6,
   });
+
+  const beamScratch = useRef({
+    dir: new THREE.Vector3(),
+    beamMid: new THREE.Vector3(),
+    fishWorld: new THREE.Vector3(),
+    fwd: new THREE.Vector3(),
+    toF: new THREE.Vector3(),
+    toB: new THREE.Vector3(),
+  }).current;
 
   // Scatter state machine. `amplitude` is the eased 0..1 displacement
   // envelope; `intensity` is its world-space magnitude in scatter
@@ -312,6 +323,40 @@ export default function Fish({
     // regular shimmer envelope, so the spooked fish catches a little
     // more light during its dart.
     const scatterBoost = sc.amplitude * 0.35;
+
+    let beamLight = 0;
+    if (lightBeam?.enabled) {
+      const bs = beamScratch;
+      const a = (lightBeam.angleDegrees * Math.PI) / 180;
+      bs.dir.set(Math.sin(a), -Math.cos(a), 0);
+      const half = lightBeam.length * 0.5;
+      bs.beamMid.set(
+        lightBeam.position[0] + bs.dir.x * half,
+        lightBeam.position[1] + bs.dir.y * half,
+        lightBeam.position[2] + bs.dir.z * half,
+      );
+      bs.fishWorld.set(displayX, displayY, displayZ);
+      rootState.camera.getWorldDirection(bs.fwd);
+      bs.toF.subVectors(bs.fishWorld, rootState.camera.position);
+      bs.toB.subVectors(bs.beamMid, rootState.camera.position);
+      const fishAlong = bs.toF.dot(bs.fwd);
+      const beamAlong = bs.toB.dot(bs.fwd);
+      const inFront = fishAlong < beamAlong - lightBeam.depthMargin;
+      if (!inFront) {
+        const vol = sampleBeamVolumeFactorMutable(bs.fishWorld, lightBeam);
+        if (vol > 0.05) {
+          beamLight += lightBeam.insideBoost * vol;
+        } else if (fishAlong > beamAlong + 0.28) {
+          const d = THREE.MathUtils.smoothstep(
+            fishAlong,
+            beamAlong + 0.28,
+            beamAlong + 5.5,
+          );
+          beamLight += lightBeam.behindBoost * d * 0.42;
+        }
+      }
+    }
+
     const totalBoost = boost + scatterBoost;
 
     if (material.current) {
@@ -319,12 +364,12 @@ export default function Fish({
         1 + (opacity - 1) * fishDistanceOpacityStrength;
       material.current.opacity = Math.min(
         1,
-        fadedOpacity + totalBoost * 0.4,
+        fadedOpacity + totalBoost * 0.4 + beamLight * 0.22,
       );
       material.current.color.setRGB(
-        Math.min(1, baseColor.r + totalBoost * 0.45),
-        Math.min(1, baseColor.g + totalBoost * 0.45),
-        Math.min(1, baseColor.b + totalBoost * 0.45),
+        Math.min(1, baseColor.r + totalBoost * 0.45 + beamLight * 0.52),
+        Math.min(1, baseColor.g + totalBoost * 0.45 + beamLight * 0.5),
+        Math.min(1, baseColor.b + totalBoost * 0.45 + beamLight * 0.48),
       );
     }
     if (group.current) {

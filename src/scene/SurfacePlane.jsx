@@ -158,7 +158,6 @@ const FRAGMENT_SHADER = /* glsl */ `
   }
 `;
 
-const PLANE_SIZE = 80;
 const PLANE_SEGMENTS = 80;
 
 export default function SurfacePlane({
@@ -173,6 +172,10 @@ export default function SurfacePlane({
   fogColor = '#0e3850',
   fogNear = 4,
   fogFar = 28,
+  planeSize = 80,
+  baseColor = '#5a90a8',
+  highlightColor = '#a8d7e6',
+  yellowColor = '#f6e9b4',
 }) {
   const meshRef = useRef();
   const { camera } = useThree();
@@ -180,8 +183,9 @@ export default function SurfacePlane({
   // Geometry and material are created once. Uniforms are mutated in
   // useFrame; we never rebuild the program.
   const geometry = useMemo(
-    () => new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE, PLANE_SEGMENTS, PLANE_SEGMENTS),
-    [],
+    () =>
+      new THREE.PlaneGeometry(planeSize, planeSize, PLANE_SEGMENTS, PLANE_SEGMENTS),
+    [planeSize],
   );
 
   const material = useMemo(
@@ -204,15 +208,11 @@ export default function SurfacePlane({
           uFogNear: { value: fogNear },
           uFogFar: { value: fogFar },
           uFogColor: { value: new THREE.Color(fogColor) },
-          // A muted aqua. Warmer than the deep-blue fog so the
-          // surface reads as the "lit" side of the volume.
-          uBaseColor: { value: new THREE.Color('#5a90a8') },
-          // The highlight tone before yellow is mixed in.
-          uHighlightColor: { value: new THREE.Color('#a8d7e6') },
-          // The warm sun colour. Soft gold, not saturated yellow.
-          uYellowColor: { value: new THREE.Color('#f6e9b4') },
+          uBaseColor: { value: new THREE.Color(baseColor) },
+          uHighlightColor: { value: new THREE.Color(highlightColor) },
+          uYellowColor: { value: new THREE.Color(yellowColor) },
           uCameraXZ: { value: new THREE.Vector2(0, 0) },
-          uPlaneSize: { value: PLANE_SIZE },
+          uPlaneSize: { value: planeSize },
         },
       }),
     // Uniforms are kept fresh in the per-frame block below.
@@ -245,6 +245,10 @@ export default function SurfacePlane({
     u.uFogNear.value = fogNear;
     u.uFogFar.value = fogFar;
     u.uFogColor.value.set(fogColor);
+    u.uBaseColor.value.set(baseColor);
+    u.uHighlightColor.value.set(highlightColor);
+    u.uYellowColor.value.set(yellowColor);
+    u.uPlaneSize.value = planeSize;
     u.uCameraXZ.value.set(camera.position.x, camera.position.z);
   });
 

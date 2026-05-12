@@ -146,7 +146,6 @@ const FRAGMENT_SHADER = /* glsl */ `
   }
 `;
 
-const PLANE_SIZE = 96;
 const PLANE_SEGMENTS = 96;
 
 export default function Seabed({
@@ -159,13 +158,18 @@ export default function Seabed({
   fogColor = '#0e3850',
   fogNear = 4,
   fogFar = 28,
+  planeSize = 96,
+  sandColor = '#d8c8a4',
+  highlightColor = '#f4ecd6',
+  goldColor = '#e7c685',
 }) {
   const meshRef = useRef();
   const { camera } = useThree();
 
   const geometry = useMemo(
-    () => new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE, PLANE_SEGMENTS, PLANE_SEGMENTS),
-    [],
+    () =>
+      new THREE.PlaneGeometry(planeSize, planeSize, PLANE_SEGMENTS, PLANE_SEGMENTS),
+    [planeSize],
   );
 
   const material = useMemo(
@@ -188,17 +192,11 @@ export default function Seabed({
           uFogColor: { value: new THREE.Color(fogColor) },
           // Warm cream sand -- not bright white, so it reads as
           // soft and natural at depth rather than artificial.
-          uSandColor: { value: new THREE.Color('#d8c8a4') },
-          // The brighter ivory used on dune crests / between
-          // caustic peaks. Slightly cooler than the gold so the
-          // gradient feels rich.
-          uHighlightColor: { value: new THREE.Color('#f4ecd6') },
-          // A subdued gold pushed into the brightest caustic spots
-          // when the user dials `goldIntensity` up. Avoids saturated
-          // yellow which would read as cartoonish.
-          uGoldColor: { value: new THREE.Color('#e7c685') },
+          uSandColor: { value: new THREE.Color(sandColor) },
+          uHighlightColor: { value: new THREE.Color(highlightColor) },
+          uGoldColor: { value: new THREE.Color(goldColor) },
           uCameraXZ: { value: new THREE.Vector2(0, 0) },
-          uPlaneSize: { value: PLANE_SIZE },
+          uPlaneSize: { value: planeSize },
         },
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -228,6 +226,10 @@ export default function Seabed({
     u.uFogFar.value = fogFar;
     u.uFogColor.value.set(fogColor);
     u.uCameraXZ.value.set(camera.position.x, camera.position.z);
+    u.uSandColor.value.set(sandColor);
+    u.uHighlightColor.value.set(highlightColor);
+    u.uGoldColor.value.set(goldColor);
+    u.uPlaneSize.value = planeSize;
   });
 
   return (

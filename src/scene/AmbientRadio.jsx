@@ -56,10 +56,22 @@ function makeOrbitSeeds(count) {
 
 const ORBIT_COUNT = 24;
 
+const DEFAULT_MOD = { beam: 1, haze: 1, shimmer: 1 };
+
 export default function AmbientRadio({
   position = [3, 0.5, -5],
   glowIntensity = 1,
   enabled = true,
+  /** When true, parent group handles world position / currents — no free bob. */
+  embedded = false,
+  /** Optional ref `{ beam, haze, shimmer }` multipliers (1 = neutral), updated by parent each frame. */
+  modRef = null,
+  /** Scales the visible orb / halo / hitbox to match typography `fontSize`. */
+  typographyScale = 1,
+  /** Letters' murk-tint hex — embedded orbs pick up the same water-stained read. */
+  murkTint = null,
+  /** Swamp-only presence model (distance-reactive + fog penetration). */
+  beaconAtmosphere = null,
 }) {
   const groupRef = useRef();
   const innerRef = useRef();
@@ -67,7 +79,15 @@ export default function AmbientRadio({
   const innerMat = useRef();
   const haloMat = useRef();
   const orbitRef = useRef();
+  const dustMat = useRef();
   const hovered = useRef(false);
+
+  const murkColor = useMemo(
+    () => (murkTint ? new THREE.Color(murkTint) : null),
+    [murkTint],
+  );
+
+  const worldPos = useMemo(() => new THREE.Vector3(), []);
 
   const { isPlaying, isLoading, toggle } = useRadio();
 
@@ -80,14 +100,45 @@ export default function AmbientRadio({
     if (!enabled) return;
     const t = state.clock.elapsedTime;
 
-    // Whole-group bob + slow yaw.
+    const mod = modRef?.current ?? DEFAULT_MOD;
+    const typ = Math.max(0.35, typographyScale);
+    const visMul = mod.beam * mod.haze * mod.shimmer;
+
+    let proxSmooth = 0;
+    let presenceMul = 1;
+    if (beaconAtmosphere && groupRef.current) {
+      groupRef.current.getWorldPosition(worldPos);
+      const dist = worldPos.distanceTo(state.camera.position);
+      const rawProx =
+        1 -
+        THREE.MathUtils.smoothstep(
+          dist,
+          beaconAtmosphere.proximityNear,
+          beaconAtmosphere.proximityFar,
+        );
+      proxSmooth = rawProx * rawProx * (3 - 2 * rawProx);
+      presenceMul =
+        beaconAtmosphere.baseVisibilityMul *
+        THREE.MathUtils.lerp(
+          1,
+          beaconAtmosphere.proximityBrightMax,
+          proxSmooth,
+        );
+    }
+
+    // Whole-group bob + slow yaw (standalone only — typography parent drifts the beacon).
     if (groupRef.current) {
-      groupRef.current.position.set(
-        position[0] + Math.sin(t * 0.32) * 0.10,
-        position[1] + Math.cos(t * 0.41) * 0.08,
-        position[2] + Math.sin(t * 0.27) * 0.06,
-      );
-      groupRef.current.rotation.y = t * 0.18;
+      if (embedded) {
+        groupRef.current.position.set(0, 0, 0);
+        groupRef.current.rotation.y = t * 0.07;
+      } else {
+        groupRef.current.position.set(
+          position[0] + Math.sin(t * 0.32) * 0.1,
+          position[1] + Math.cos(t * 0.41) * 0.08,
+          position[2] + Math.sin(t * 0.27) * 0.06,
+        );
+        groupRef.current.rotation.y = t * 0.18;
+      }
     }
 
     // Pulse envelope: louder beat when playing, gentle breath when idle.
@@ -97,28 +148,77 @@ export default function AmbientRadio({
     const hoverBoost = hovered.current ? 1.2 : 1.0;
 
     if (innerRef.current) {
-      innerRef.current.scale.setScalar(pulse);
+      innerRef.current.scale.setScalar(pulse * typ);
     }
     if (haloRef.current) {
       // Halo scale also tracks beat plus a small base size so the orb
       // always has visible glow even when paused.
-      const haloScale = 1.6 + pulse * 0.45 + playMix * 0.25;
+      let haloScale =
+        (1.6 + pulse * 0.45 + playMix * 0.25) * typ;
+      if (beaconAtmosphere) {
+        haloScale *= 1 + (1 - proxSmooth) * beaconAtmosphere.haloFarSpread;
+      }
       haloRef.current.scale.set(haloScale, haloScale, haloScale);
     }
 
     // Materials: opacity / colour shift between idle and playing.
     if (innerMat.current) {
-      const baseAlpha = isPlaying ? 0.95 : 0.65;
+      const baseAlpha = isPlaying ? 0.95 : 0.72;
       const loadFlicker = isLoading ? 0.85 + Math.sin(t * 9) * 0.15 : 1.0;
+      const discoverBoost = embedded ? 1.08 : 1.0;
       innerMat.current.opacity =
-        baseAlpha * glowIntensity * hoverBoost * loadFlicker;
+        baseAlpha *
+        glowIntensity *
+        hoverBoost *
+        loadFlicker *
+        visMul *
+        discoverBoost *
+        presenceMul;
       // Subtle warm-up when playing, cooler & dimmer when paused.
       const target = isPlaying ? warm : cool;
       innerMat.current.color.lerp(target, 0.05);
+      if (embedded && murkColor) {
+        const murkAmt = beaconAtmosphere?.murkLerpInner ?? 0.22;
+        innerMat.current.color.lerp(murkColor, murkAmt);
+      }
     }
     if (haloMat.current) {
-      const baseAlpha = isPlaying ? 0.85 : 0.45;
-      haloMat.current.opacity = baseAlpha * glowIntensity * hoverBoost;
+      const baseAlpha = isPlaying ? 0.92 : 0.58;
+      haloMat.current.opacity =
+        baseAlpha *
+        glowIntensity *
+        hoverBoost *
+        visMul *
+        (embedded ? 1.06 : 1.0) *
+        presenceMul;
+      if (embedded && murkColor) {
+        const murkAmt = beaconAtmosphere?.murkLerpHalo ?? 0.14;
+        haloMat.current.color.lerp(murkColor, murkAmt);
+      }
+    }
+    if (dustMat.current) {
+      const proxDust = beaconAtmosphere
+        ? beaconAtmosphere.orbitDustBaseScale +
+          proxSmooth * beaconAtmosphere.orbitDustProxScale
+        : 1;
+      dustMat.current.opacity =
+        (isPlaying ? 0.92 : 0.72) *
+        glowIntensity *
+        hoverBoost *
+        visMul *
+        (embedded ? 1.05 : 1.0) *
+        presenceMul *
+        (beaconAtmosphere
+          ? THREE.MathUtils.lerp(0.94, 1.08, proxSmooth)
+          : 1);
+      dustMat.current.size =
+        0.1 *
+        Math.max(1, typographyScale) *
+        (beaconAtmosphere ? proxDust : 1);
+      if (embedded && murkColor) {
+        const murkAmt = beaconAtmosphere?.murkLerpDust ?? 0.12;
+        dustMat.current.color.lerp(murkColor, murkAmt);
+      }
     }
 
     // Orbiting particles: per-particle Lissajous-style path. Speeds and
@@ -133,9 +233,10 @@ export default function AmbientRadio({
         const omega = orbitSeeds[i * 4 + 2];
         const vAmp = orbitSeeds[i * 4 + 3];
         const a = phase + tEff * omega;
-        arr[i * 3 + 0] = Math.cos(a) * radius;
-        arr[i * 3 + 1] = Math.sin(tEff * omega * 1.3 + phase) * vAmp * 0.5;
-        arr[i * 3 + 2] = Math.sin(a) * radius;
+        arr[i * 3 + 0] = Math.cos(a) * radius * typ;
+        arr[i * 3 + 1] =
+          Math.sin(tEff * omega * 1.3 + phase) * vAmp * 0.5 * typ;
+        arr[i * 3 + 2] = Math.sin(a) * radius * typ;
       }
       op.needsUpdate = true;
     }
@@ -185,7 +286,7 @@ export default function AmbientRadio({
         Radius is generous (~1.0 world units) so the visible halo at
         the orb's distance translates to a comfortable ~50px target.
       */}
-      <mesh>
+      <mesh scale={Math.max(typographyScale, 0.72)}>
         <sphereGeometry args={[1.0, 16, 12]} />
         <meshBasicMaterial
           transparent
@@ -219,8 +320,9 @@ export default function AmbientRadio({
           />
         </bufferGeometry>
         <pointsMaterial
+          ref={dustMat}
           map={dustTexture}
-          size={0.1}
+          size={0.1 * Math.max(1, typographyScale)}
           color={'#bdeaf2'}
           transparent
           depthWrite={false}

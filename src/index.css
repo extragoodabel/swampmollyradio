@@ -69,6 +69,20 @@ canvas:active {
   z-index: 5;
 }
 
+/* Soft palette bridge between atmosphere modes (above canvas, under chrome). */
+.theme-crossfade {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 7;
+  opacity: 0;
+  transition: opacity 0.55s ease-in-out;
+}
+
+.theme-crossfade--on {
+  opacity: 0.2;
+}
+
 .radio-overlay {
   position: fixed;
   left: 32px;
@@ -125,4 +139,58 @@ canvas:active {
 
 .radio-overlay__hint--error {
   color: rgba(245, 175, 175, 0.7);
+}
+
+/* Compact atmosphere switch — single line, minimal chrome. */
+.theme-mode {
+  position: fixed;
+  bottom: 24px;
+  left: 28px;
+  z-index: 12;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5em 0.65em;
+  max-width: min(420px, calc(100vw - 56px));
+  pointer-events: auto;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(170, 210, 225, 0.5);
+}
+
+.theme-mode__btn {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 800;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: rgba(175, 215, 230, 0.42);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  text-underline-offset: 0.22em;
+  transition: color 180ms ease, opacity 180ms ease;
+}
+
+.theme-mode__btn:hover,
+.theme-mode__btn:focus-visible {
+  outline: none;
+  color: rgba(220, 245, 255, 0.82);
+}
+
+.theme-mode__btn--active {
+  color: rgba(235, 250, 255, 0.95);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+}
+
+.theme-mode__sep {
+  opacity: 0.45;
+  font-weight: 700;
+  user-select: none;
 }

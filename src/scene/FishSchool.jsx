@@ -52,7 +52,9 @@ function buildClusters(rand, clusterCount, bounds, spread) {
   for (let i = 0; i < clusterCount; i++) {
     const cx = (rand() * 2 - 1) * bounds.x * 0.55 * spread;
     const cy = (rand() * 2 - 1) * bounds.y * 0.55 * spread;
-    const depthBias = Math.pow(rand(), 1.6);
+    // Slightly forward bias so more fish read in mid / foreground at
+    // load (depth hierarchy vs. a uniform sheet at the back plane).
+    const depthBias = Math.pow(rand(), 1.38);
     const cz = lerp(2.5, -bounds.z, depthBias);
 
     const angle = (rand() * 2 - 1) * 0.25;
@@ -132,6 +134,8 @@ export default function FishSchool({
   bubbleSpawnRate = 1.0,
   bubbleLifetime = 2.2,
   maxBubbles = 120,
+  /** Per-fish volume lighting from the cinematic beam (theme + Leva position). */
+  lightBeam = null,
 }) {
   // Shared mutable context. Each Fish pushes its registry entry on
   // mount (and writes its world position to it each frame). The
@@ -289,6 +293,7 @@ export default function FishSchool({
           riderCanScatter={riderCanScatter}
           textureFacesLeft={textureFacesLeft}
           baseWidth={baseWidth}
+          lightBeam={lightBeam}
         />
       ))}
       <ScatterManager

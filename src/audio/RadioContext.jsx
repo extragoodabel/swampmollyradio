@@ -3,10 +3,11 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
-import { DEFAULT_STATION } from './stations.js';
+import { DEFAULT_STATION_ID, getStation } from './stations.js';
 
 /**
  * Single source of truth for the ambient radio.
@@ -45,8 +46,12 @@ function clamp01(v) {
   return Math.min(1, Math.max(0, v));
 }
 
-export function RadioProvider({ children }) {
-  const [station, setStation] = useState(DEFAULT_STATION); // eslint-disable-line no-unused-vars
+export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
+  // Resolve the active station from the (theme-driven) stationId
+  // prop. Memoised so child memo deps that reference `station` are
+  // stable until the prop actually changes.
+  const station = useMemo(() => getStation(stationId), [stationId]);
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasEverPlayed, setHasEverPlayed] = useState(false);
@@ -358,6 +363,38 @@ export function RadioProvider({ children }) {
       teardownGraph();
     };
   }, [teardownGraph]);
+
+  // Station change (theme toggle). Stop the current stream and reset
+  // playback state so the next play() builds a fresh element pointing
+  // at the new URL. We deliberately *don't* auto-resume on the new
+  // station: switching modes is a deliberate context change, and
+  // bridging it with audio would feel jarring.
+  const lastStationIdRef = useRef(stationId);
+  useEffect(() => {
+    if (lastStationIdRef.current === stationId) return;
+    lastStationIdRef.current = stationId;
+
+    // Stop playback and discard the current audio element so the
+    // next play() sees a clean slate. The Web Audio graph (if any)
+    // was hooked to the old element, so it has to go with it.
+    if (audioRef.current) {
+      try {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      } catch {
+        /* ignore */
+      }
+      audioRef.current = null;
+    }
+    teardownGraph();
+    setIsPlaying(false);
+    setIsLoading(false);
+    setError(null);
+    setNowPlaying(null);
+    // hasEverPlayed is intentionally preserved -- the overlay's
+    // "tap the beacon to resume" hint is still relevant after a
+    // mode switch.
+  }, [stationId, teardownGraph]);
 
   const value = {
     station,

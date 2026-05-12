@@ -188,6 +188,85 @@ void main() {
 }
 `;
 
+/** Salmon Days Radio — airy open water, magenta/silver highlights, no swamp greens. */
+const FRAGMENT_SHADER_OPEN_OCEAN = `
+${SIMPLEX_3D_GLSL}
+
+uniform float uTime;
+uniform float uAnimationSpeed;
+uniform float uNoiseScale;
+uniform float uGradientIntensity;
+uniform float uPinkAccentStrength;
+uniform float uDiagonalFlowStrength;
+uniform float uBackgroundOpacity;
+uniform vec3 uFogColor;
+uniform float uFogNear;
+uniform float uFogFar;
+
+varying vec2 vUv;
+varying float vHeight;
+varying float vFogDepth;
+varying float vFlow;
+
+void main() {
+  float t = uTime * uAnimationSpeed;
+  float tSlow = uTime * uAnimationSpeed * 0.55;
+  vec2 flowDir = normalize(vec2(0.62, 0.78));
+  vec2 flowDir2 = normalize(vec2(-0.38, 0.92));
+
+  float gradT = clamp(
+    vHeight * 0.46 + 0.54 + vFlow * 0.24 * uGradientIntensity,
+    0.0, 1.0
+  );
+  vec3 c0 = vec3(0.040, 0.072, 0.155);
+  vec3 c1 = vec3(0.11, 0.16, 0.42);
+  vec3 c2 = vec3(0.42, 0.55, 0.9);
+  vec3 c3 = vec3(0.88, 0.62, 0.72);
+  vec3 c4 = vec3(0.99, 0.92, 0.76);
+  vec3 c5 = vec3(0.96, 0.97, 1.0);
+  gradT = clamp(gradT, 0.0, 1.0);
+  vec3 col;
+  if (gradT < 0.2) col = mix(c0, c1, gradT / 0.2);
+  else if (gradT < 0.45) col = mix(c1, c2, (gradT - 0.2) / 0.25);
+  else if (gradT < 0.7) col = mix(c2, c3, (gradT - 0.45) / 0.25);
+  else if (gradT < 0.88) col = mix(c3, c4, (gradT - 0.7) / 0.18);
+  else col = mix(c4, c5, (gradT - 0.88) / 0.12);
+
+  vec2 pinkUV = vUv * uNoiseScale * 0.52
+                - flowDir * t * 0.35 * uDiagonalFlowStrength;
+  float pinkN = snoise(vec3(pinkUV + vec2(130.0, 240.0), t * 0.16));
+  float pinkMask = smoothstep(0.34, 0.82, pinkN) * uPinkAccentStrength * 0.52;
+  vec3 pink = vec3(0.97, 0.65, 0.78);
+  col = mix(col, pink, pinkMask);
+
+  vec2 peachUV = vUv * uNoiseScale * 0.38 + flowDir2 * tSlow * 0.22;
+  float peachN = snoise(vec3(peachUV + vec2(-40.0, 90.0), tSlow * 0.12));
+  float peachMask = smoothstep(0.38, 0.76, peachN) * 0.28 * uGradientIntensity;
+  col = mix(col, vec3(0.99, 0.78, 0.65), peachMask);
+
+  float shimmer = snoise(vec3(vUv * uNoiseScale * 3.2
+                              - flowDir * t * 1.05 * uDiagonalFlowStrength,
+                              t * 0.62));
+  shimmer = smoothstep(0.48, 0.96, shimmer) * 0.26;
+  col += vec3(0.96, 0.93, 0.98) * shimmer * uGradientIntensity;
+
+  float silver = snoise(vec3(vUv * uNoiseScale * 5.4 + flowDir2 * t * 0.55, t * 0.4));
+  silver = smoothstep(0.62, 0.98, silver) * 0.14;
+  col += vec3(0.88, 0.91, 1.0) * silver * uGradientIntensity;
+
+  float fogFactor = smoothstep(uFogNear, uFogFar, vFogDepth);
+  col = mix(col, uFogColor, fogFactor);
+  float alpha = uBackgroundOpacity * (1.0 - fogFactor * 0.22);
+
+  vec2 uvC = (vUv - 0.5) * vec2(1.04, 1.01);
+  float radial = length(uvC);
+  float edgeAtten = 1.0 - smoothstep(0.22, 0.98, radial);
+  alpha *= mix(0.08, 1.0, edgeAtten);
+
+  gl_FragColor = vec4(col, alpha);
+}
+`;
+
 export default function BackgroundField({
   displacementStrength = 2.5,
   noiseScale = 2.6,
@@ -202,8 +281,14 @@ export default function BackgroundField({
   fogColor = '#0e3850',
   fogNear = 14,
   fogFar = 58,
+  /** `openOcean` = Salmon Days-style luminous void; `default` = shared swampy baseline. */
+  palette = 'default',
 }) {
   const matRef = useRef();
+  const fragmentShader = useMemo(
+    () => (palette === 'openOcean' ? FRAGMENT_SHADER_OPEN_OCEAN : FRAGMENT_SHADER),
+    [palette],
+  );
 
   const uniforms = useMemo(
     () => ({
@@ -235,16 +320,19 @@ export default function BackgroundField({
     u.uDiagonalFlowStrength.value = diagonalFlowStrength;
     u.uBackgroundOpacity.value = backgroundOpacity;
     u.uFogColor.value.set(fogColor);
+    u.uFogNear.value = fogNear;
+    u.uFogFar.value = fogFar;
   });
 
   return (
     <mesh position={position} renderOrder={-10} frustumCulled={false}>
       <planeGeometry args={[...size, ...segments]} />
       <shaderMaterial
+        key={palette}
         ref={matRef}
         uniforms={uniforms}
         vertexShader={VERTEX_SHADER}
-        fragmentShader={FRAGMENT_SHADER}
+        fragmentShader={fragmentShader}
         transparent
         depthWrite={false}
         side={THREE.DoubleSide}

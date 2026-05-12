@@ -44,6 +44,8 @@ const VERTEX_SHADER = /* glsl */ `
   uniform float uTime;
   uniform float uSwayStrength;
   uniform float uSwaySpeed;
+  uniform float uVerticalDream;
+  uniform float uDreamVSpeed;
 
   attribute float aPhase;
   attribute float aSwayAmp;
@@ -86,6 +88,10 @@ const VERTEX_SHADER = /* glsl */ `
     // without making the strand look like it's twitching.
     rotated.x += sin(sw * 2.2 + u * 6.0)  * aSwayAmp * uSwayStrength * 0.12 * weight;
 
+    float vDrift = uVerticalDream * pow(u, 1.25);
+    rotated.y += sin(uTime * uDreamVSpeed + aPhase * 1.7) * vDrift;
+    rotated.y += sin(uTime * uDreamVSpeed * 0.63 + u * 3.1) * vDrift * 0.35;
+
     vec4 world = modelMatrix * instanceMatrix * vec4(rotated, 1.0);
     vWorld = world.xyz;
     vColor = aColor;
@@ -99,6 +105,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float uFogNear;
   uniform float uFogFar;
   uniform vec3 uFogColor;
+  uniform float uAbyssBlend;
 
   varying float vU;
   varying vec3 vColor;
@@ -115,6 +122,15 @@ const FRAGMENT_SHADER = /* glsl */ `
     // Soft fades at the very root and the very tip so neither end
     // looks chopped off.
     float endFade = smoothstep(0.0, 0.04, vU) * smoothstep(1.0, 0.85, vU);
+
+    // Open-ocean giant kelp: roots dissolve into abyss (no visible endpoint).
+    if (uAbyssBlend > 0.01) {
+      float rootVeil = smoothstep(0.0, 0.38, vU);
+      vec3 deepCol = uFogColor * 0.06;
+      c = mix(deepCol, c, rootVeil);
+      float rootAlpha = smoothstep(0.0, 0.22, vU);
+      endFade *= mix(1.0, rootAlpha, uAbyssBlend);
+    }
 
     // Lateral edge softening: the ribbon's outer edges feather out
     // so we don't see a hard line where the plane ends. This stands
@@ -135,7 +151,7 @@ const FRAGMENT_SHADER = /* glsl */ `
   }
 `;
 
-const MAX_KELP = 320;
+const MAX_KELP = 420;
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -165,9 +181,22 @@ export default function KelpForest({
   fogColor = '#0e3850',
   fogNear = 4,
   fogFar = 28,
-  // Seed controls the deterministic layout. Bump it to reshuffle
-  // strand placement / sway phases without affecting other scene
-  // randomness.
+  // Fraction of strands as broad moss clumps; remainder splits between
+  // trailing hangers and ribbon kelp via `trailerRatio`.
+  mossRatio = 0,
+  /** Fraction of (non-moss) strands as heavy trailing / hanging growth (Swamp). */
+  trailerRatio = 0,
+  /** Theme multipliers — Swamp Molly bumps moss/ribbon scale; Salmon stays 1. */
+  mossHeightMul = 1,
+  mossThicknessMul = 1,
+  ribbonHeightMul = 1,
+  ribbonThicknessMul = 1,
+  /** Salmon Days: giant kelp column / abyss dissolve (does not affect Swamp). */
+  visualMode = 'default',
+  abyssBlend = 0,
+  /** Subtle vertical “current” shimmer in `visualMode === 'openOcean'`. */
+  verticalDream = 0.12,
+  dreamVerticalSpeed = 0.18,
   seed = 2024,
 }) {
   const meshRef = useRef();
@@ -194,10 +223,13 @@ export default function KelpForest({
           uTime: { value: 0 },
           uSwayStrength: { value: swayStrength },
           uSwaySpeed: { value: swaySpeed },
+          uVerticalDream: { value: 0 },
+          uDreamVSpeed: { value: 0.22 },
           uOpacity: { value: opacity },
           uFogColor: { value: new THREE.Color(fogColor) },
           uFogNear: { value: fogNear },
           uFogFar: { value: fogFar },
+          uAbyssBlend: { value: 0 },
         },
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -234,13 +266,81 @@ export default function KelpForest({
       const x = Math.cos(angle) * r;
       const z = Math.sin(angle) * r;
 
-      // Strand dimensions. Height runs short-to-tall; thickness
-      // runs slim-to-thread but never very wide. Taller strands
-      // sway slightly more for natural inertia.
-      const height = 3.5 + rand() * 9.5;
-      const thickness = 0.08 + Math.pow(rand(), 1.4) * 0.22;
+      const kindRoll = rand();
+      const tr = Math.min(
+        Math.max(0, trailerRatio),
+        Math.max(0, 1 - mossRatio),
+      );
+      const isMoss = kindRoll < mossRatio;
+      const isTrailer =
+        !isMoss && kindRoll < mossRatio + tr;
 
-      tmp.position.set(x, seabedY + height * 0.5, z);
+      let height;
+      let thickness;
+      let swayBase;
+      let spiralRate;
+      let r0;
+      let g0;
+      let b0;
+      let lightness;
+
+      if (isMoss) {
+        // Moss: broad clumps rooted in the seabed — scaled by theme on swamp.
+        height = (2.2 + rand() * 5.2) * mossHeightMul;
+        thickness =
+          (0.62 + Math.pow(rand(), 1.35) * 1.22) * mossThicknessMul;
+        swayBase = 0.16 + rand() * 0.28;
+        spiralRate = (rand() * 2 - 1) * 0.55;
+        const olive = rand();
+        lightness = 0.44 + rand() * 0.26;
+        r0 = 0.18 + olive * 0.22;
+        g0 = 0.34 + (1 - olive) * 0.16;
+        b0 = 0.14 + olive * 0.08;
+      } else if (isTrailer) {
+        // Trailing / hanging swamp masses — taller, thicker ribbons, lazy spiral.
+        height = (5.5 + rand() * 14.5) * ribbonHeightMul;
+        thickness =
+          (0.24 + Math.pow(rand(), 1.05) * 0.52) * ribbonThicknessMul;
+        swayBase = 0.3 + rand() * 0.58;
+        spiralRate =
+          (rand() * 2 - 1) * (1.4 + Math.pow(rand(), 2) * 2.8);
+        const olive = rand();
+        lightness = 0.48 + rand() * 0.3;
+        r0 = 0.13 + olive * 0.18;
+        g0 = 0.36 + (1 - olive) * 0.14;
+        b0 = 0.16 + olive * 0.12;
+      } else {
+        // Standard kelp ribbons — longer columns in open ocean (sparse rim).
+        if (visualMode === 'openOcean') {
+          height = (30 + rand() * 98) * ribbonHeightMul;
+          thickness =
+            (0.09 + Math.pow(rand(), 1.4) * 0.22) * ribbonThicknessMul;
+          swayBase = (0.38 + rand() * 0.62) * 0.78;
+          const sBase = rand() * 2 - 1;
+          spiralRate = Math.sign(sBase) * Math.pow(Math.abs(sBase), 3) * 3.6;
+          const cool = rand();
+          lightness = 0.42 + rand() * 0.32;
+          r0 = 0.1 + (1 - cool) * 0.1;
+          g0 = 0.36 + cool * 0.14 + lightness * 0.12;
+          b0 = 0.26 + cool * 0.28;
+        } else {
+          height = (4.2 + rand() * 12.5) * ribbonHeightMul;
+          thickness =
+            (0.11 + Math.pow(rand(), 1.35) * 0.32) * ribbonThicknessMul;
+          swayBase = 0.48 + rand() * 0.95;
+          const sBase = rand() * 2 - 1;
+          spiralRate = Math.sign(sBase) * Math.pow(Math.abs(sBase), 3) * 4.8;
+          const cool = rand();
+          lightness = 0.54 + rand() * 0.34;
+          r0 = 0.12 + (1 - cool) * 0.14;
+          g0 = 0.40 + cool * 0.08 + lightness * 0.15;
+          b0 = 0.22 + cool * 0.30;
+        }
+      }
+
+      const rootJitterY =
+        visualMode === 'openOcean' ? (rand() - 0.5) * 9.0 : 0;
+      tmp.position.set(x, seabedY + height * 0.5 + rootJitterY, z);
       // Random yaw so each strand faces a different direction --
       // when paired with the random sway phase, this prevents the
       // ribbons from all looking like they're flexing along the
@@ -256,36 +356,33 @@ export default function KelpForest({
       phases[i] = rand() * Math.PI * 2;
       // Taller strands carry a bit more sway amplitude -- gives a
       // sense that mass and length matter, even though there's no
-      // physics here.
-      swayAmps[i] = (0.45 + rand() * 0.9) * (0.55 + height / 14);
-
-      // Cubic-biased spiral rate. Most strands have a barely-there
-      // twist; a few have a more pronounced screw. The user brief
-      // calls for "some strands should spiral slightly" which is
-      // what the cubic bias gives.
-      const sBase = rand() * 2 - 1;
-      spiralRates[i] = Math.sign(sBase) * Math.pow(Math.abs(sBase), 3) * 4.5;
-
+      // physics here. Moss uses its own (lower) base sway so its
+      // chunky clumps don't whip around.
+      swayAmps[i] = swayBase * (0.55 + height / 14);
+      spiralRates[i] = spiralRate;
       thicknesses[i] = thickness;
 
-      // Green/teal palette with deterministic variation. Hue stays
-      // in the seaweed range (no blue/grey); brightness varies so
-      // the forest reads as natural rather than monotone.
-      const cool = rand(); // 0 = warm sea-green, 1 = cool teal
-      const lightness = 0.55 + rand() * 0.35;
-      // Manually blended R/G/B; cheap and avoids pulling in a HSL
-      // helper. Targets sit roughly between #2f7d4d (warm green)
-      // and #1f8f8a (cool teal).
-      const r0 = 0.12 + (1 - cool) * 0.14;
-      const g0 = 0.40 + cool * 0.08 + lightness * 0.15;
-      const b0 = 0.22 + cool * 0.30;
       colors[i * 3 + 0] = Math.min(1, r0 * lightness);
       colors[i * 3 + 1] = Math.min(1, g0 * lightness * 1.05);
       colors[i * 3 + 2] = Math.min(1, b0 * lightness);
     }
 
     return { matrices, phases, swayAmps, spiralRates, thicknesses, colors };
-  }, [safeCount, distanceBias, seabedY, innerRadius, outerRadius, seed]);
+  }, [
+    safeCount,
+    distanceBias,
+    seabedY,
+    innerRadius,
+    outerRadius,
+    seed,
+    mossRatio,
+    trailerRatio,
+    mossHeightMul,
+    mossThicknessMul,
+    ribbonHeightMul,
+    ribbonThicknessMul,
+    visualMode,
+  ]);
 
   // Push the instance buffers onto the geometry / mesh once the
   // mesh has mounted. Rebuilds whenever the dataset rebuilds.
@@ -319,10 +416,13 @@ export default function KelpForest({
     u.uTime.value = s.clock.elapsedTime;
     u.uSwayStrength.value = swayStrength;
     u.uSwaySpeed.value = swaySpeed;
+    u.uVerticalDream.value = visualMode === 'openOcean' ? verticalDream : 0;
+    u.uDreamVSpeed.value = dreamVerticalSpeed;
     u.uOpacity.value = opacity;
     u.uFogColor.value.set(fogColor);
     u.uFogNear.value = fogNear;
     u.uFogFar.value = fogFar;
+    u.uAbyssBlend.value = abyssBlend;
   });
 
   if (safeCount === 0) return null;

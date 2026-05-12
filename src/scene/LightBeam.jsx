@@ -3,44 +3,12 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
 /**
- * `LightBeam`
- *
- * Broad, atmospheric underwater sunlight. A single plane that
- * billboards around its beam axis -- the plane's "up" is locked to
- * the configured beam direction, its normal rotates to face the
- * camera. That keeps the shaft visible from any horizontal viewing
- * angle without flattening into a screen-space overlay.
- *
- * The mesh is additive + depthTest on / depthWrite off, so:
- *   - fish *behind* the beam pick up the beam's brightness (the
- *     "fish glow when they swim through" read), and
- *   - fish *in front* still occlude it (the "shaft cuts through
- *     the mid-distance" read).
- *
- * Volumetric feel is built from four shader layers:
- *
- *   1. A wide Gaussian "halo" cross-section -- this is the
- *      cathedral light. It defines the *region* of water that's
- *      illuminated. Tunable via `uBeamDiffusion` (sigma) and
- *      `uBeamRegionSize` (scale).
- *   2. A narrower Gaussian "core" sitting inside the halo. This is
- *      the visibly-warmer center of the shaft. Tunable via
- *      `uBeamFalloff` and softened further by `uBeamSoftness`.
- *   3. A low-frequency, slow-drifting noise field (3 sine layers
- *      at different angles & speeds) that adds soft caustic
- *      variation inside the beam. Tunable via `uBeamCausticStrength`
- *      and `uBeamNoiseScale`.
- *   4. Smooth vertical end-fade (top + bottom) so the beam enters
- *      and exits the water without hard caps.
- *
- * Colour mixes a cool aqua base toward a warm cream centre, biased
- * by the core falloff (the halo stays aqua, the centre warms).
- * `uBeamOpacity` is a global multiplier on the whole envelope so
- * the beam can be sat further back into the haze.
- *
- * Fog awareness: view-space depth folds into a brightness
- * multiplier so the distal end of the beam dissolves into the
- * water medium instead of popping into nothing.
+ * Theme-driven underwater light: `style === 'ocean'` is broad open-water
+ * sun; `style === 'swamp'` uses a separate fragment branch — soft
+ * fragmented volumetric murk (pockets, streaks, muddy fringe) meant to
+ * read as distant headlights / haze in dirty water, not a spotlight cone.
+ * Optional `secondLayer` adds a second faint billboarding region with its
+ * own phase offset.
  */
 
 const VERTEX_SHADER = /* glsl */ `
@@ -57,6 +25,7 @@ const VERTEX_SHADER = /* glsl */ `
 
 const FRAGMENT_SHADER = /* glsl */ `
   uniform float uTime;
+  uniform float uStyle;
   uniform float uIntensity;
   uniform float uOpacity;
   uniform float uSoftness;
@@ -68,16 +37,24 @@ const FRAGMENT_SHADER = /* glsl */ `
   uniform float uColorWarmth;
   uniform vec3 uColdColor;
   uniform vec3 uWarmColor;
+  uniform vec3 uAccentColor;
+  uniform float uAccentStrength;
+  uniform float uOceanCoreMix;
+  uniform float uUvDrift;
   uniform float uFogNear;
   uniform float uFogFar;
+  uniform float uFogCut;
+  uniform float uFogLightReach;
+  uniform float uSwampNarrow;
+  uniform float uSwampChop;
+  uniform float uMurkFog;
+  uniform float uSwampFogFMul;
+  uniform float uSwampFogFloor;
+  uniform float uSwampDiscardMin;
 
   varying vec2 vUv;
   varying float vDepth;
 
-  // Smooth Gaussian-ish bell evaluated at distance |d| with sigma s.
-  // exp(-d^2 / s^2) gives a clean falloff without the sharp tip of
-  // pow((1 - d), n). Clamping s away from 0 keeps the expression
-  // numerically safe when the slider goes near zero.
   float bell(float d, float s) {
     float sig = max(0.04, s);
     float k = d / sig;
@@ -85,77 +62,236 @@ const FRAGMENT_SHADER = /* glsl */ `
   }
 
   void main() {
-    // Lateral position: 0 at the beam centre, 1 at either edge of
-    // the geometry. Note that the geometry is already widened by
-    // beamRegionSize on the JS side, so this UV space is the *full
-    // visible region*, not just the bright core.
-    float dx = abs(vUv.x - 0.5) * 2.0;
+    float tSlow = uTime * uShimmerSpeed * (uStyle > 0.5 ? 0.31 : 1.0);
+    float drift =
+      sin(vUv.y * 2.7 + tSlow * (uStyle > 0.5 ? 0.09 : 0.22)) * uUvDrift
+      + sin(vUv.y * 4.1 - tSlow * 0.14) * uUvDrift * (uStyle > 0.5 ? 0.55 : 0.0);
+    float dx = abs(vUv.x - 0.5 + drift) * 2.0;
+    if (uStyle > 0.5) dx *= uSwampNarrow;
 
-    // Wide diffuse halo defines the illuminated region. This is
-    // what gives the cathedral-light shape: a broad, soft glow
-    // that everything inside it sits in.
     float halo = bell(dx, uDiffusion);
+    float coreRaw = pow(bell(dx, uFalloff), max(0.35, uSoftness));
 
-    // Narrower bright core sits *inside* the halo. uSoftness
-    // raises the bell to a fractional power, slumping the tip --
-    // small values (< 1) give a broader plateau, larger values
-    // give a tighter centre line. Default 1.5 is a gentle plateau.
-    float core = pow(bell(dx, uFalloff), max(0.4, uSoftness));
+    float crossSec;
+    float swampEnv = 0.0;
+    float swampCoreH = 0.0;
+    if (uStyle < 0.5) {
+      crossSec = mix(halo, coreRaw, uOceanCoreMix);
+      crossSec = max(crossSec, halo * 0.62);
+    } else {
+      // Swamp: wide soft envelope + fragmented pockets (murky water
+      // interrupting the shaft — not a narrow cone or ribbon).
+      float dxN = dx;
+      float envelope = bell(dxN, uDiffusion * 1.72);
+      envelope = mix(envelope, bell(dxN * 0.52, uDiffusion * 2.45), 0.58);
+      float coreHint =
+        pow(bell(dxN, uFalloff * 1.18), max(0.38, uSoftness * 0.88)) * 0.48;
+      swampEnv = envelope;
+      swampCoreH = coreHint;
 
-    // Combined cross-section. The halo provides the floor; the
-    // core lifts the centre. Mixed (not summed) so we never go
-    // above 1.0 before later multipliers.
-    float crossSec = max(halo * 0.55, core);
+      float fy = vUv.y * uNoiseScale * 1.12 + tSlow * 0.095;
+      float fx = vUv.x * uNoiseScale * 1.28 - tSlow * 0.082;
+      float murkA = sin(fy * 2.35 + sin(fx * 1.85)) * 0.5 + 0.5;
+      float murkB = sin(fy * 4.6 - fx * 3.05 + tSlow * 0.11) * 0.5 + 0.5;
+      float murkC =
+        sin((vUv.y + vUv.x * 0.58) * uNoiseScale * 3.45 + tSlow * 0.088) * 0.5
+        + 0.5;
+      float pocket = mix(0.48, 1.0, murkA * 0.42 + murkB * 0.34 + murkC * 0.24);
 
-    // Anything outside the visible halo we just drop -- saves a
-    // lot of fragment work for the long thin shaft.
-    if (crossSec < 0.0025) discard;
+      float streak = sin(vUv.y * uNoiseScale * 6.0 + vUv.x * 7.4 + tSlow * 0.21);
+      streak = streak * 0.5 + 0.5;
+      streak = mix(0.74, 1.0, streak);
 
-    // Vertical end-fades. Larger windows (0.78 -> 0.85 at the top,
-    // 0.30 -> 0.35 at the bottom) keep the beam from terminating
-    // visibly; combined with the wider region this reads as light
-    // entering through the surface and dispersing into depth.
-    float topFade = smoothstep(1.0, 0.82, vUv.y);
-    float botFade = smoothstep(0.0, 0.35, vUv.y);
+      float chop =
+        sin(vUv.y * uNoiseScale * 2.15 + tSlow * 0.26) *
+        sin(vUv.x * uNoiseScale * 1.58 - tSlow * 0.23);
+      chop = chop * 0.5 + 0.5;
+      float chopMix = mix(1.0 - uSwampChop * 0.58, 1.0, chop);
+
+      float limb = 1.0 - smoothstep(0.52, 1.28, dxN);
+
+      crossSec = (envelope * 0.58 + coreHint) * pocket * streak * chopMix * limb;
+    }
+
+    // Soft rolloff instead of discard — avoids a popping, aliased cutoff.
+    float secSoft = smoothstep(
+      0.0,
+      uStyle > 0.5 ? max(0.012, uSwampDiscardMin * 8.0) : 0.022,
+      crossSec
+    );
+    crossSec *= secSoft;
+
+    float topFade = smoothstep(1.0, uStyle > 0.5 ? 0.58 : 0.76, vUv.y);
+    float botFade = smoothstep(0.0, uStyle > 0.5 ? 0.28 : 0.38, vUv.y);
     float lengthMask = topFade * botFade;
 
-    // Three slow, low-frequency sine layers at different angles
-    // and drift rates produce a soft caustic field. The point is
-    // not to look like waves -- it's to give the impression of
-    // sunlight being slowly refracted by moving water above. Low
-    // amplitude (controlled by uCausticStrength) keeps it
-    // atmospheric rather than busy.
-    float t = uTime * uShimmerSpeed;
-    float n1 = sin(vUv.y * uNoiseScale * 1.3 - t * 0.55 + vUv.x * 1.7);
-    float n2 = sin(vUv.y * uNoiseScale * 0.7 + t * 0.32 - vUv.x * 1.2);
-    float n3 = sin((vUv.x + vUv.y) * uNoiseScale * 0.9 + t * 0.41);
-    float n = (n1 + n2 + n3) / 3.0;       // -1..1
-    float caustic = 1.0 + n * uCausticStrength * 0.5;
+    float nFreq = uNoiseScale * (uStyle > 0.5 ? 1.5 : 0.82);
+    float n1 = sin(vUv.y * nFreq * 1.25 - tSlow * 0.41 + vUv.x * 1.55);
+    float n2 = sin(vUv.y * nFreq * 0.68 + tSlow * 0.22 - vUv.x * 1.05);
+    float n3 = sin((vUv.x + vUv.y) * nFreq * 0.88 + tSlow * 0.3);
+    float n4 =
+      uStyle > 0.5
+        ? sin(vUv.y * nFreq * 2.4 + vUv.x * 1.9 - tSlow * 0.55) * 0.35
+        : 0.0;
+    float n = (n1 + n2 + n3) / 3.0 + n4;
+    float caustic = 1.0 + n * uCausticStrength * (uStyle > 0.5 ? 0.48 : 0.38);
 
-    // Colour: halo stays cool aqua, centre warms toward cream.
-    // The core (not the halo) drives the warm-mix amount so the
-    // outer region never picks up a strong yellow cast.
-    vec3 color = mix(uColdColor, uWarmColor, clamp(core * uColorWarmth, 0.0, 1.0));
+    float warmAmt =
+      uStyle > 0.5
+        ? clamp(
+            (swampEnv * 0.62 + swampCoreH * 1.05 + coreRaw * 0.55) *
+              uColorWarmth *
+              0.68,
+            0.0,
+            1.0
+          )
+        : coreRaw * uColorWarmth;
+    vec3 color = mix(uColdColor, uWarmColor, clamp(warmAmt, 0.0, 1.0));
 
-    // Fog attenuation: the distal end of the beam fades into the
-    // water medium so it doesn't pop against the dark background.
+    if (uStyle < 0.5) {
+      float acc = clamp((n * 0.5 + 0.5) - 0.28, 0.0, 1.0) * uAccentStrength;
+      color = mix(color, uAccentColor, acc);
+    } else {
+      // Muddy teal fringe — extra cold channel in the penumbra.
+      float fringe = 1.0 - bell(dx, uDiffusion * 2.1);
+      color = mix(color, uColdColor * 1.08, fringe * 0.28);
+    }
+
     float fogF = clamp(
       (vDepth - uFogNear) / max(0.0001, uFogFar - uFogNear),
       0.0, 1.0
     );
-    float fogAtten = 1.0 - fogF * 0.65;
+    if (uStyle > 0.5) fogF *= uSwampFogFMul;
+
+    float fogAtten = (1.0 - fogF * uFogCut) * uFogLightReach;
+    if (uStyle > 0.5) {
+      fogAtten *= mix(1.0, 1.0 - fogF * 0.32, uMurkFog);
+      fogAtten = max(fogAtten, uSwampFogFloor * (1.0 - fogF * 0.55));
+    }
 
     float alpha =
       crossSec * lengthMask * caustic * uIntensity * uOpacity * fogAtten;
 
-    // Additive blending consumes alpha as brightness. Multiplying
-    // color by caustic too means the caustic field modulates both
-    // hue intensity and opacity, which sells the refraction.
+    // Feather the billboard quad so the layer dissolves before the mesh edge.
+    float rimX = smoothstep(0.0, 0.15, vUv.x) * smoothstep(1.0, 0.85, vUv.x);
+    float rimY = smoothstep(0.0, 0.11, vUv.y) * smoothstep(1.0, 0.89, vUv.y);
+    alpha *= rimX * rimY;
+
     gl_FragColor = vec4(color * caustic, alpha);
   }
 `;
 
+function createBeamMaterial() {
+  return new THREE.ShaderMaterial({
+    vertexShader: VERTEX_SHADER,
+    fragmentShader: FRAGMENT_SHADER,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    uniforms: {
+      uTime: { value: 0 },
+      uStyle: { value: 0 },
+      uIntensity: { value: 1 },
+      uOpacity: { value: 0.5 },
+      uSoftness: { value: 1.5 },
+      uFalloff: { value: 0.5 },
+      uDiffusion: { value: 1.1 },
+      uCausticStrength: { value: 0.3 },
+      uNoiseScale: { value: 6 },
+      uShimmerSpeed: { value: 1 },
+      uColorWarmth: { value: 0.5 },
+      uColdColor: { value: new THREE.Color('#6fb5cf') },
+      uWarmColor: { value: new THREE.Color('#fff1c8') },
+      uAccentColor: { value: new THREE.Color('#e5c0dc') },
+      uAccentStrength: { value: 0.15 },
+      uOceanCoreMix: { value: 0.08 },
+      uUvDrift: { value: 0.03 },
+      uFogNear: { value: 4 },
+      uFogFar: { value: 28 },
+      uFogCut: { value: 0.5 },
+      uFogLightReach: { value: 1 },
+      uSwampNarrow: { value: 1.2 },
+      uSwampChop: { value: 0.35 },
+      uMurkFog: { value: 0.8 },
+      uSwampFogFMul: { value: 1 },
+      uSwampFogFloor: { value: 0 },
+      uSwampDiscardMin: { value: 0.00035 },
+    },
+  });
+}
+
+function syncMaterialFromProps(mat, props, elapsed, styleFlag) {
+  mat.uniforms.uTime.value = elapsed;
+  mat.uniforms.uStyle.value = styleFlag;
+  mat.uniforms.uIntensity.value = props.intensity;
+  mat.uniforms.uOpacity.value = props.opacity;
+  mat.uniforms.uSoftness.value = props.softness;
+  mat.uniforms.uFalloff.value = props.falloff;
+  mat.uniforms.uDiffusion.value = props.diffusion;
+  mat.uniforms.uCausticStrength.value = props.causticStrength;
+  mat.uniforms.uNoiseScale.value = props.noiseScale;
+  mat.uniforms.uShimmerSpeed.value = props.shimmerSpeed;
+  mat.uniforms.uColorWarmth.value = props.colorWarmth;
+  mat.uniforms.uColdColor.value.set(props.coldColor);
+  mat.uniforms.uWarmColor.value.set(props.warmColor);
+  mat.uniforms.uAccentColor.value.set(props.accentColor);
+  mat.uniforms.uAccentStrength.value = props.accentStrength;
+  mat.uniforms.uOceanCoreMix.value = props.oceanCoreMix;
+  mat.uniforms.uUvDrift.value = props.uvDrift;
+  mat.uniforms.uFogNear.value = props.fogNear;
+  mat.uniforms.uFogFar.value = props.fogFar;
+  mat.uniforms.uFogCut.value = props.fogCut;
+  mat.uniforms.uFogLightReach.value = props.fogLightReach;
+  mat.uniforms.uSwampNarrow.value = props.swampNarrow;
+  mat.uniforms.uSwampChop.value = props.swampChop;
+  mat.uniforms.uMurkFog.value = props.murkFog;
+  mat.uniforms.uSwampFogFMul.value = props.swampFogFMul;
+  mat.uniforms.uSwampFogFloor.value = props.swampFogFloor;
+  mat.uniforms.uSwampDiscardMin.value = props.swampDiscardMin;
+}
+
+function placeBillboardMesh({
+  mesh,
+  camera,
+  scratch,
+  position,
+  angleDegrees,
+  width,
+  length,
+  regionSize,
+}) {
+  const a = (angleDegrees * Math.PI) / 180;
+  scratch.direction.set(Math.sin(a), -Math.cos(a), 0).normalize();
+
+  const halfLen = length * 0.5;
+  mesh.position.set(
+    position[0] + scratch.direction.x * halfLen,
+    position[1] + scratch.direction.y * halfLen,
+    position[2] + scratch.direction.z * halfLen,
+  );
+
+  camera.getWorldPosition(scratch.camPos);
+  mesh.getWorldPosition(scratch.meshPos);
+  scratch.toCam.copy(scratch.camPos).sub(scratch.meshPos);
+
+  scratch.right.crossVectors(scratch.direction, scratch.toCam);
+  const rLen = scratch.right.length();
+  if (rLen < 1e-5) scratch.right.set(1, 0, 0);
+  else scratch.right.multiplyScalar(1.0 / rLen);
+  scratch.up.copy(scratch.direction);
+  scratch.forward.crossVectors(scratch.right, scratch.up).normalize();
+
+  scratch.basis.makeBasis(scratch.right, scratch.up, scratch.forward);
+  mesh.quaternion.setFromRotationMatrix(scratch.basis);
+
+  mesh.scale.set(width * regionSize, length, 1);
+}
+
 export default function LightBeam({
+  style = 'ocean',
+  secondLayer = null,
   position = [-5, 8, -6],
   angleDegrees = 18,
   width = 4.5,
@@ -170,52 +306,34 @@ export default function LightBeam({
   noiseScale = 6.0,
   shimmerSpeed = 1.0,
   colorWarmth = 0.65,
+  coldColor = '#6fb5cf',
+  warmColor = '#fff1c8',
+  accentColor = '#e5c0dc',
+  accentStrength = 0.15,
+  oceanCoreMix = 0.08,
+  uvDrift = 0.03,
+  fogCut = 0.55,
+  fogLightReach = 1.0,
+  swampNarrow = 1.2,
+  swampChop = 0.35,
+  murkFog = 0.75,
+  /** Swamp only: scales view-space fog ramp so shafts survive deeper murk. */
+  swampFogFMul = 1,
+  swampFogFloor = 0,
+  swampDiscardMin = 0.00035,
   fogNear = 4,
   fogFar = 28,
 }) {
-  const meshRef = useRef();
+  const meshA = useRef();
+  const meshB = useRef();
   const { camera } = useThree();
 
-  const material = useMemo(
-    () =>
-      new THREE.ShaderMaterial({
-        vertexShader: VERTEX_SHADER,
-        fragmentShader: FRAGMENT_SHADER,
-        transparent: true,
-        depthWrite: false,
-        depthTest: true,
-        side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending,
-        uniforms: {
-          uTime: { value: 0 },
-          uIntensity: { value: intensity },
-          uOpacity: { value: opacity },
-          uSoftness: { value: softness },
-          uFalloff: { value: falloff },
-          uDiffusion: { value: diffusion },
-          uCausticStrength: { value: causticStrength },
-          uNoiseScale: { value: noiseScale },
-          uShimmerSpeed: { value: shimmerSpeed },
-          uColorWarmth: { value: colorWarmth },
-          // Aqua tint that matches the water medium.
-          uColdColor: { value: new THREE.Color('#6fb5cf') },
-          // Soft warm sun. Slightly cream, not saturated yellow.
-          uWarmColor: { value: new THREE.Color('#fff1c8') },
-          uFogNear: { value: fogNear },
-          uFogFar: { value: fogFar },
-        },
-      }),
-    // Uniforms are updated imperatively in useFrame; the material is
-    // built once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
+  const styleFlag = style === 'swamp' ? 1 : 0;
 
-  // Unit plane; final dimensions come from mesh.scale each frame so
-  // Leva sliders apply without rebuilding the geometry.
+  const [matA, matB] = useMemo(() => [createBeamMaterial(), createBeamMaterial()], []);
+
   const geometry = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
 
-  // Scratch vectors -- avoid allocating in the hot loop.
   const scratch = useMemo(
     () => ({
       camPos: new THREE.Vector3(),
@@ -230,84 +348,101 @@ export default function LightBeam({
     [],
   );
 
+  const propsBundle = {
+    intensity,
+    opacity,
+    softness,
+    falloff,
+    diffusion,
+    causticStrength,
+    noiseScale,
+    shimmerSpeed,
+    colorWarmth,
+    coldColor,
+    warmColor,
+    accentColor,
+    accentStrength,
+    oceanCoreMix,
+    uvDrift,
+    fogCut,
+    fogLightReach,
+    swampNarrow,
+    swampChop,
+    murkFog,
+    swampFogFMul,
+    swampFogFloor,
+    swampDiscardMin,
+    fogNear,
+    fogFar,
+  };
+
   useFrame((s) => {
-    const mesh = meshRef.current;
-    if (!mesh) return;
-
     const t = s.clock.elapsedTime;
-    material.uniforms.uTime.value = t;
-    material.uniforms.uIntensity.value = intensity;
-    material.uniforms.uOpacity.value = opacity;
-    material.uniforms.uSoftness.value = softness;
-    material.uniforms.uFalloff.value = falloff;
-    material.uniforms.uDiffusion.value = diffusion;
-    material.uniforms.uCausticStrength.value = causticStrength;
-    material.uniforms.uNoiseScale.value = noiseScale;
-    material.uniforms.uShimmerSpeed.value = shimmerSpeed;
-    material.uniforms.uColorWarmth.value = colorWarmth;
-    material.uniforms.uFogNear.value = fogNear;
-    material.uniforms.uFogFar.value = fogFar;
+    syncMaterialFromProps(matA, propsBundle, t, styleFlag);
 
-    // Beam direction in world space. angle is the tilt from straight
-    // down, measured around the Z axis. A positive angle tilts the
-    // beam toward +X (rightward) as it descends, so a beam entering
-    // upper-left and angled "slightly downward" reads naturally as
-    // pointing inward into the scene.
-    const a = (angleDegrees * Math.PI) / 180;
-    scratch.direction.set(Math.sin(a), -Math.cos(a), 0).normalize();
-
-    // Position the *centre* of the plane at half the beam length
-    // below the configured source position, so the source sits at
-    // the top of the visible shaft.
-    const halfLen = length * 0.5;
-    mesh.position.set(
-      position[0] + scratch.direction.x * halfLen,
-      position[1] + scratch.direction.y * halfLen,
-      position[2] + scratch.direction.z * halfLen,
-    );
-
-    // Billboard around the beam direction: keep the plane's "up"
-    // locked to `direction` and rotate around that axis until the
-    // plane normal points at the camera.
-    camera.getWorldPosition(scratch.camPos);
-    mesh.getWorldPosition(scratch.meshPos);
-    scratch.toCam.copy(scratch.camPos).sub(scratch.meshPos);
-
-    // right = direction X toCam (perp to both)
-    scratch.right.crossVectors(scratch.direction, scratch.toCam);
-    const rLen = scratch.right.length();
-    if (rLen < 1e-5) {
-      // Degenerate: camera is on the beam axis. Pick an arbitrary
-      // perpendicular so the plane still has a defined orientation.
-      scratch.right.set(1, 0, 0);
-    } else {
-      scratch.right.multiplyScalar(1.0 / rLen);
+    const mA = meshA.current;
+    if (mA) {
+      placeBillboardMesh({
+        mesh: mA,
+        camera,
+        scratch,
+        position,
+        angleDegrees,
+        width,
+        length,
+        regionSize,
+      });
     }
-    scratch.up.copy(scratch.direction); // already unit
-    scratch.forward.crossVectors(scratch.right, scratch.up).normalize();
 
-    scratch.basis.makeBasis(scratch.right, scratch.up, scratch.forward);
-    mesh.quaternion.setFromRotationMatrix(scratch.basis);
-
-    // Lateral scale = width * regionSize. The bright core stays
-    // anchored to `width`; the diffuse halo extends out to the
-    // full geometry width (which is width * regionSize). That's
-    // what makes the beam read as "a region of illuminated water"
-    // rather than a single shaft.
-    mesh.scale.set(width * regionSize, length, 1);
+    if (secondLayer && meshB.current) {
+      const sl = secondLayer;
+      const pos = [
+        position[0] + sl.positionOffset[0],
+        position[1] + sl.positionOffset[1],
+        position[2] + sl.positionOffset[2],
+      ];
+      const ang = angleDegrees + (sl.angleDelta ?? 0);
+      const w = width * (sl.widthMul ?? 0.5);
+      const len = length * (sl.lengthMul ?? 0.9);
+      const pb = {
+        ...propsBundle,
+        intensity: intensity * (sl.intensityMul ?? 0.85),
+        opacity: opacity * (sl.opacityMul ?? 0.4),
+      };
+      syncMaterialFromProps(matB, pb, t + (sl.timePhase ?? 0.18), styleFlag);
+      placeBillboardMesh({
+        mesh: meshB.current,
+        camera,
+        scratch,
+        position: pos,
+        angleDegrees: ang,
+        width: w,
+        length: len,
+        regionSize,
+      });
+    }
   });
 
   return (
-    <mesh
-      ref={meshRef}
-      frustumCulled={false}
-      // Decorative -- never block clicks on the radio beacon.
-      raycast={() => null}
-      // Render after opaque fish so additive blending lands on top
-      // of fish pixels that are *behind* the beam in z.
-      renderOrder={2}
-      geometry={geometry}
-      material={material}
-    />
+    <group>
+      <mesh
+        ref={meshA}
+        frustumCulled={false}
+        raycast={() => null}
+        renderOrder={style === 'swamp' ? -2 : 2}
+        geometry={geometry}
+        material={matA}
+      />
+      {secondLayer ? (
+        <mesh
+          ref={meshB}
+          frustumCulled={false}
+          raycast={() => null}
+          renderOrder={style === 'swamp' ? -2 : 2}
+          geometry={geometry}
+          material={matB}
+        />
+      ) : null}
+    </group>
   );
 }
