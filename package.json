@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/intel-one-mono": "^5.2.2",
     "@react-three/drei": "^9.114.0",
     "@react-three/fiber": "^8.17.10",
     "leva": "^0.10.1",

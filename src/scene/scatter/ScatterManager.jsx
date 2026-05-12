@@ -63,6 +63,10 @@ function pickNearby(origin, radius, registry, max, exclude) {
 export function triggerFishScatter(fish, direction, intensity, ctx) {
   const sc = fish.scatter;
   if (sc.state !== 'idle' || sc.cooldown > 0) return false;
+  // Per-fish opt-out -- used by the #99 rider when the user disables
+  // its scatter behaviour via Leva. Other systems (currents, shimmer)
+  // still run normally; only the spook reflex is silenced.
+  if (fish.canScatter === false) return false;
 
   sc.direction.copy(direction);
   sc.intensity = intensity;

@@ -125,7 +125,14 @@ function HazeLayer({
   });
 
   return (
-    <mesh position={[0, 0, -distance]} frustumCulled={false}>
+    // raycast disabled -- haze planes sit between the camera and any
+    // interactive object (e.g. the ambient radio beacon). They are
+    // purely decorative and should never intercept pointer events.
+    <mesh
+      position={[0, 0, -distance]}
+      frustumCulled={false}
+      raycast={() => null}
+    >
       <planeGeometry args={[size, size * 0.7, 1, 1]} />
       <shaderMaterial
         ref={matRef}

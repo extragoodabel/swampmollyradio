@@ -94,7 +94,33 @@ export default function FishSchool({
   avoidanceRadius = 1.2,
   fishDistanceOpacityStrength = 0.4,
   texture,
+  // Optional second texture used for the single "#99 rider" salmon.
+  // When present, exactly one fish in the school will use it.
+  riderTexture,
+  // True when the provided texture's silhouette faces LEFT (the new
+  // pixel-art WebP sprites). False for the original SVG / procedural
+  // fallback art, which face right.
+  textureFacesLeft = false,
+  // When false, the rider salmon is not chosen and every fish uses
+  // the default texture. Exposed via Leva so the user can disable
+  // the easter egg.
+  enableRider = true,
+  // Width applied to the default-aspect plane. Fish.jsx computes
+  // height from its active texture's aspect ratio.
   baseWidth = 2,
+  // Per-rider visual tuning. The rider sprite has a taller aspect
+  // (a player sits on top of the fish body); these props let us
+  // scale it slightly larger / boost its shimmer so it remains
+  // legible in the crowd without breaking the "behaves like any
+  // other fish" rule.
+  riderScaleMultiplier = 1.1,
+  riderShimmerBoost = 1.15,
+  // Multiplier on the rider's tint, applied once when the rider is
+  // chosen so the player sprite has a tiny baseline glow above the
+  // school's average colour. Clamped per-channel so it can't go
+  // beyond white.
+  riderGlowBoost = 1.0,
+  riderCanScatter = true,
   scatterEnabled = true,
   randomScatterFrequency = 0.25,
   scatterRadius = 4.0,
@@ -117,14 +143,6 @@ export default function FishSchool({
     registry: [],
     bubble: { spawn: null },
   }).current;
-  const planeSize = useMemo(() => {
-    if (texture?.image?.width && texture?.image?.height) {
-      const aspect = texture.image.width / texture.image.height;
-      return [baseWidth, baseWidth / aspect];
-    }
-    return [baseWidth, baseWidth / 2];
-  }, [texture, baseWidth]);
-
   const fish = useMemo(() => {
     const rand = mulberry32(seed);
     const clusters = buildClusters(rand, clusterCount, bounds, spread);
@@ -196,8 +214,30 @@ export default function FishSchool({
         extraParallax,
         tint,
         shimmerScale,
+        isRider: false,
       });
     }
+
+    // Pick exactly ONE fish to be the #99 rider. Using Math.random()
+    // (not the seeded rand) so each fresh page-load picks a
+    // different salmon, while everything else about the school stays
+    // deterministic. If the user disables the rider via Leva, no
+    // index is picked.
+    if (arr.length > 0 && enableRider) {
+      const riderIdx = Math.floor(Math.random() * arr.length);
+      arr[riderIdx].isRider = true;
+      // Apply the glow-boost as a tint multiplier so the rider has a
+      // subtle, constant baseline brightness on top of whatever the
+      // shimmer envelope is doing. Clamped to <= 1 per channel to
+      // avoid framebuffer-clipping artefacts.
+      const g = riderGlowBoost;
+      arr[riderIdx].tint = [
+        Math.min(1, arr[riderIdx].tint[0] * g),
+        Math.min(1, arr[riderIdx].tint[1] * g),
+        Math.min(1, arr[riderIdx].tint[2] * g),
+      ];
+    }
+
     return arr;
   }, [
     count,
@@ -208,6 +248,8 @@ export default function FishSchool({
     spread,
     clusterCount,
     foregroundCrossingChance,
+    enableRider,
+    riderGlowBoost,
   ]);
 
   return (
@@ -218,7 +260,9 @@ export default function FishSchool({
           fishId={f.key}
           scatterCtx={scatterCtx}
           position={f.position}
-          scale={f.scale}
+          // Apply the rider scale bump here so all of Fish's per-frame
+          // scaling math (shimmer growth etc.) just multiplies through.
+          scale={f.scale * (f.isRider ? riderScaleMultiplier : 1)}
           direction={f.direction}
           speed={f.speed}
           wiggleSpeed={f.wiggleSpeed}
@@ -227,18 +271,24 @@ export default function FishSchool({
           variant={f.variant}
           opacity={f.opacity}
           shimmerSeed={f.shimmerSeed}
-          canShimmer={f.canShimmer}
+          // Rider gets its shimmer enabled and amplified slightly so
+          // it remains visible in the crowd.
+          canShimmer={f.canShimmer || f.isRider}
+          shimmerScale={f.shimmerScale * (f.isRider ? riderShimmerBoost : 1)}
           layer={f.layer}
           extraParallax={f.extraParallax}
           tint={f.tint}
-          shimmerScale={f.shimmerScale}
           bounds={bounds}
           swimSpeed={swimSpeed}
           shimmerIntensity={shimmerIntensity}
           avoidanceRadius={avoidanceRadius}
           fishDistanceOpacityStrength={fishDistanceOpacityStrength}
           texture={texture}
-          planeSize={planeSize}
+          riderTexture={riderTexture}
+          isRider={f.isRider}
+          riderCanScatter={riderCanScatter}
+          textureFacesLeft={textureFacesLeft}
+          baseWidth={baseWidth}
         />
       ))}
       <ScatterManager

@@ -2,10 +2,12 @@ import { Canvas } from '@react-three/fiber';
 import { Suspense } from 'react';
 import { Leva } from 'leva';
 import Scene from './scene/Scene.jsx';
+import { RadioProvider } from './audio/RadioContext.jsx';
+import RadioOverlay from './ui/RadioOverlay.jsx';
 
 export default function App() {
   return (
-    <>
+    <RadioProvider>
       <Leva
         collapsed
         titleBar={{ title: 'Aquarium controls', drag: true }}
@@ -34,8 +36,11 @@ export default function App() {
       <div className="vignette" />
       <div className="overlay">
         <div className="overlay__title">Dark Aquarium · POC</div>
-        <div className="overlay__hint">Drag to turn · scroll to drift</div>
+        <div className="overlay__hint">
+          Drag to turn · scroll to drift · find the beacon
+        </div>
       </div>
-    </>
+      <RadioOverlay />
+    </RadioProvider>
   );
 }

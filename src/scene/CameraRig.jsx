@@ -90,10 +90,23 @@ export default function CameraRig({
   }, [camera]);
 
   useEffect(() => {
+    // Map wheel/trackpad scroll to camera-Z translation.
+    //
+    // The camera's +Z axis points OUT of the screen toward the
+    // viewer, so larger Z = further from the school, smaller Z =
+    // deeper inside it. We *add* deltaY (rather than subtract) so
+    // that a "forward" scroll -- two fingers swiping up on a
+    // trackpad, wheel rolling away from the user -- pushes the
+    // camera into the scene, which is what natural touchpad
+    // navigation expects. Scrolling back pulls the camera out.
+    //
+    // Smoothing, easing, inertia, and the Z clamp are handled by
+    // the existing pipeline (the lerp in useFrame and the clamp()
+    // call here), so this single sign flip is the entire change.
     const onWheel = (e) => {
       const p = propsRef.current;
       scrollZ.current = clamp(
-        scrollZ.current - e.deltaY * 0.006 * p.scrollDepthStrength,
+        scrollZ.current + e.deltaY * 0.006 * p.scrollDepthStrength,
         p.cameraZMin,
         p.cameraZMax,
       );

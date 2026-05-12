@@ -68,3 +68,61 @@ canvas:active {
   );
   z-index: 5;
 }
+
+.radio-overlay {
+  position: fixed;
+  left: 32px;
+  top: 72px;
+  z-index: 11;
+  pointer-events: none;
+  font-family: inherit;
+  max-width: 280px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 1.2s ease, transform 1.2s ease;
+  color: rgba(210, 235, 245, 0.8);
+}
+
+.radio-overlay--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.radio-overlay__state {
+  font-size: 9px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: rgba(160, 210, 225, 0.55);
+}
+
+.radio-overlay__station {
+  margin-top: 6px;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(220, 240, 250, 0.92);
+}
+
+.radio-overlay__track {
+  margin-top: 8px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: rgba(180, 215, 230, 0.78);
+  line-height: 1.45;
+}
+
+.radio-overlay__track--soft {
+  color: rgba(160, 200, 215, 0.55);
+  font-style: italic;
+}
+
+.radio-overlay__hint {
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: rgba(170, 210, 225, 0.5);
+}
+
+.radio-overlay__hint--error {
+  color: rgba(245, 175, 175, 0.7);
+}

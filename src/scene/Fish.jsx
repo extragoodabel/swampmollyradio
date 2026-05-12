@@ -11,15 +11,24 @@ import {
 /**
  * Single fish: a textured plane.
  *
- * Texture source:
- *   - If `texture` prop is provided (the loaded salmon SVG), use it.
- *   - Otherwise fall back to the procedural canvas variant.
- * In both cases, `planeSize` controls the geometry dimensions so the
- * aspect ratio of whatever texture is supplied is preserved.
+ * Texture source priority:
+ *   1. If `isRider` and `riderTexture` is provided -> the #99 rider
+ *      WebP. Exactly one fish per school carries this.
+ *   2. Else if `texture` is provided (the new pixel-art WebP, or
+ *      the legacy SVG via SalmonSvgFallback) -> use that.
+ *   3. Else -> procedural canvas fallback.
+ *
+ * The active texture also drives:
+ *   - the plane's aspect ratio (so the rider's taller sprite is
+ *     never stretched into the default 2:1 box, and the default
+ *     sprite is never squashed), and
+ *   - the horizontal flip sign: pixels in the new WebP art face
+ *     left, so swimming right requires `scale.x = -1`. The legacy
+ *     SVG and the procedural fallback face right and use the
+ *     opposite convention. `textureFacesLeft` toggles which.
  *
  * The motion / shimmer / current / avoidance / parallax logic is
- * unchanged -- the only thing the asset swap touches is the material
- * map, the plane dimensions, and the per-fish tint color.
+ * unchanged.
  */
 export default function Fish({
   position,
@@ -42,7 +51,11 @@ export default function Fish({
   avoidanceRadius = 1.2,
   fishDistanceOpacityStrength = 1,
   texture,
-  planeSize = [2, 1],
+  riderTexture,
+  isRider = false,
+  riderCanScatter = true,
+  textureFacesLeft = false,
+  baseWidth = 2,
   tint = [1, 1, 1],
   fishId = 0,
   scatterCtx = null,
@@ -52,7 +65,34 @@ export default function Fish({
   const material = useRef();
 
   const fallbackTexture = useMemo(() => getFishTexture(variant), [variant]);
-  const activeTexture = texture ?? fallbackTexture;
+
+  // Resolve which texture to actually render. The rider gets its
+  // own; everyone else gets the school's default; if even that
+  // failed to load, drop to the procedural canvas.
+  const activeTexture =
+    (isRider && riderTexture) ? riderTexture : (texture ?? fallbackTexture);
+
+  // The procedural fallback always faces RIGHT. Only honour the
+  // `textureFacesLeft` flag when we're actually rendering a real
+  // school texture (the WebP or SVG); otherwise the legacy
+  // right-facing flip logic must apply.
+  const activeFacesLeft =
+    activeTexture === riderTexture || activeTexture === texture
+      ? textureFacesLeft
+      : false;
+
+  // Per-fish plane dimensions derived from whichever texture this
+  // particular fish ended up with. The rider sprite is taller than
+  // the default sprite, so we cannot share a single `planeSize`
+  // across the school.
+  const planeSize = useMemo(() => {
+    const img = activeTexture?.image;
+    if (img && img.width && img.height) {
+      const aspect = img.width / img.height;
+      return [baseWidth, baseWidth / aspect];
+    }
+    return [baseWidth, baseWidth / 2];
+  }, [activeTexture, baseWidth]);
 
   const baseColor = useMemo(
     () => new THREE.Color(tint[0], tint[1], tint[2]),
@@ -100,10 +140,12 @@ export default function Fish({
       position: new THREE.Vector3(position[0], position[1], position[2]),
       scatter: scatter.current,
       facing: direction,
+      // The rider can be opted out of scatter via Leva; default true.
+      canScatter: !isRider || riderCanScatter,
     }),
     // facing/direction is stable, position object is mutated in place.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [fishId],
+    [fishId, isRider, riderCanScatter],
   );
 
   useEffect(() => {
@@ -231,7 +273,18 @@ export default function Fish({
 
       body.current.rotation.z = wag * wiggleAmount * 0.25 + scatterTilt;
       const stretch = 1 + Math.sin(s.t * wiggleSpeed * 2 + phase) * 0.04;
-      body.current.scale.x = (direction < 0 ? -1 : 1) * stretch;
+      // `textureSign` encodes whether the source art needs mirroring
+      // to align with +X. Art that faces RIGHT (legacy SVG /
+      // procedural) uses +1; art that faces LEFT (new pixel-art
+      // WebP) uses -1. The direction multiplier then mirrors when
+      // the fish swims the opposite way. Net result:
+      //   - left-facing art swimming left  -> scale.x = +1 (as-is)
+      //   - left-facing art swimming right -> scale.x = -1 (flipped)
+      //   - right-facing art swimming left -> scale.x = -1 (flipped)
+      //   - right-facing art swimming right -> scale.x = +1 (as-is)
+      const textureSign = activeFacesLeft ? -1 : 1;
+      body.current.scale.x =
+        textureSign * (direction < 0 ? -1 : 1) * stretch;
       body.current.scale.y = 1 + Math.cos(s.t * wiggleSpeed + phase) * 0.02;
     }
 
@@ -282,12 +335,36 @@ export default function Fish({
 
   return (
     <group ref={group} position={position} scale={scale}>
-      <mesh ref={body}>
+      {/*
+        raycast={null} so fish never intercept pointer events from the
+        canvas. We want the ambient radio beacon (and any future
+        interactive props) to remain clickable even when a fish is
+        rendered in front of it.
+
+        frustumCulled={false} because a fish that gets pushed very
+        close to the camera by the avoidance offset can drift its
+        bounding sphere outside the side frustum during a fast
+        drag; default culling then yanks the whole sprite off
+        screen for a frame or two, which reads as the fish
+        "blinking" out and back in. The mesh is cheap enough to
+        unconditionally draw -- ~90 hero fish, each one plane.
+      */}
+      <mesh ref={body} raycast={() => null} frustumCulled={false}>
         <planeGeometry args={planeSize} />
         <meshBasicMaterial
           ref={material}
           map={activeTexture}
+          // alphaTest discards near-transparent pixels at the
+          // sprite's silhouette so the pixel-art salmon renders
+          // with crisp edges. 0.5 was too aggressive: edge pixels
+          // that hover near the threshold flicker on and off as
+          // the fish moves sub-pixel amounts close to the camera.
+          // 0.2 still hides the soft anti-alias halo of the WebP
+          // sprites without pop. `transparent` stays on so the
+          // per-fish opacity fade + shimmer envelope still
+          // modulate the sprite as a whole.
           transparent
+          alphaTest={0.2}
           opacity={opacity}
           depthWrite={false}
           side={THREE.DoubleSide}

@@ -43,6 +43,16 @@ Open the URL Vite prints. Move the mouse for camera parallax. Click the
 - **Depth-driven traits** (closer fish are larger / crisper / faster, farther fish smaller / dimmer)
 - **Shimmer events**: per-fish randomly-timed pulses of opacity, scale, and brightness so the school catches light intermittently
 - ~400 additive dust particles drifting upward
+- **Scatter system**: fish occasionally "spook" and dart sideways,
+  briefly speeding up and trailing translucent bubbles before easing
+  back into the current. Random spooks can chain to nearby fish, and
+  pushing the camera into a fish or yawing toward one triggers a local
+  scatter wave.
+- **Ambient underwater radio**: a small glowing beacon orb sits in the
+  mid-distance. Clicking it toggles a SomaFM ambient stream (Deep Space
+  One by default), with smooth volume fades and an optional lowpass
+  filter that thickens the audio "through water". A discreet bottom-left
+  overlay surfaces the station name + now-playing track.
 - Camera parallax that eases toward the normalized cursor position
 - Subtle radial vignette (CSS overlay)
 - **Leva control panel** for live tuning
@@ -97,28 +107,55 @@ like grabbing the inside of a sphere (Google Street View model).
 | water  | `hazeLayerCount`           | 0-6 haze planes between viewer and BackgroundField           |
 | water  | `hazeMovementSpeed`        | time multiplier for noise drift + caustic phase              |
 | water  | `particleDepthDensity`     | scales dust count (and dust spans a wider z range)           |
+| scatter| `scatterEnabled`           | master toggle for the whole scatter + bubble system          |
+| scatter| `randomScatterFrequency`   | expected spontaneous scatters per second                     |
+| scatter| `scatterRadius`            | search radius for nearby fish (random + camera scatter)      |
+| scatter| `scatterStrength`          | peak displacement multiplier during the scatter burst        |
+| scatter| `scatterDuration`          | seconds the "scattering" phase lasts before recovery         |
+| scatter| `scatterRecoverySpeed`     | higher = snappier ease-back to the home lane                 |
+| scatter| `chainReactionChance`      | probability a triggered scatter wakes its neighbours         |
+| scatter| `bubbleTrailEnabled`       | suppress bubble spawning while keeping scatter motion        |
+| scatter| `bubbleSpawnRate`          | bubbles emitted per scatter event                            |
+| scatter| `bubbleLifetime`           | seconds a bubble lives before fading out                     |
+| scatter| `maxBubbles`               | upper bound for pooled bubble draw count                     |
+| radio  | `ambientRadioEnabled`      | hide the beacon and stop playback when off                   |
+| radio  | `radioVolume`              | master gain (0..1), live-applied to the AudioContext         |
+| radio  | `radioGlowIntensity`       | scales the orb opacity + halo strength                       |
+| radio  | `radioPosition`            | vec3 location of the beacon in the aquarium                  |
+| radio  | `underwaterAudioFilterStrength` | dry/wet crossfade for the 950Hz lowpass (best-effort)   |
 
 ## File layout
 
 ```
 src/
   main.jsx
-  App.jsx               # <Canvas>, <Leva>, DOM vignette + overlay
+  App.jsx               # <RadioProvider>, <Canvas>, <Leva>, DOM vignette + overlay
   index.css
   scene/
     Scene.jsx           # Leva controls, background, fog, lights, layer mount order
     CameraRig.jsx       # drag-to-turn yaw/pitch + scroll Z + hover + idle sway
     FishSchool.jsx      # seeded RNG -> ribbon clusters -> N fish (procedural fallback)
     SalmonSchool.jsx    # loads salmon SVG, passes texture into FishSchool
-    Fish.jsx            # single plane: drift + current + wag + shimmer + camera avoidance
+    Fish.jsx            # single plane: drift + current + wag + shimmer + scatter
+    AmbientRadio.jsx    # glowing beacon orb + halo + orbit particles + click target
     BackgroundField.jsx # distant displaced shader plane (caustics palette)
     WaterHaze.jsx       # N camera-attached noise+caustic haze planes
     DustParticles.jsx   # THREE.Points dust system
     ErrorBoundary.jsx   # falls back from SalmonSchool -> FishSchool on load failure
     currents.js         # shared current field sampled by every fish
+    scatter/
+      ScatterManager.jsx # decides when fish spook (random / camera-driven / chain)
+      BubbleTrails.jsx   # pooled THREE.Points bubble sprites trailing scatters
     assets/
       fishTexture.js    # canvas-drawn fish silhouette (4 variants, cached)
       dustTexture.js    # soft circular alpha sprite
+      bubbleTexture.js  # translucent bubble shell sprite
+      haloTexture.js    # radial gradient halo for the radio beacon
+  audio/
+    stations.js         # SomaFM station catalog (extensible)
+    RadioContext.jsx    # HTMLAudio + Web Audio graph (lowpass) + fades + CORS fallback
+  ui/
+    RadioOverlay.jsx    # bottom-left atmospheric station / now-playing readout
 ```
 
 ## Why it feels coordinated (not screensaver-random)
@@ -189,6 +226,82 @@ distinct effects:
 `particleDepthDensity` scales the dust count and `DUST_VOLUME.z` is
 widened to 24 so suspended particles populate the entire visible depth.
 
+## Scatter behavior
+
+Each fish carries a tiny scatter state machine: `idle` → `scattering`
+→ `recovering` → `idle`. The state advances inside `Fish.jsx`'s
+`useFrame`; only the **displacement, rotation tilt, and shimmer spike**
+are added on top of the normal current-driven motion, so the underlying
+school physics is never replaced.
+
+`ScatterManager.jsx` owns *when* a scatter fires:
+
+- **Spontaneous** — at expected rate `randomScatterFrequency` (per
+  second) it picks one fish and rolls a recursive chain: each
+  neighbour within `scatterRadius` may also scatter with
+  `chainReactionChance` (with weaker intensity / a slight delay).
+- **Camera-driven** — every frame it watches the camera's forward
+  vector and its rate of change. If the camera pushes hard along its
+  forward (scroll-in) or yaws rapidly, fish caught inside a soft cone
+  in front of the camera scatter away from the view axis.
+- **Cooldowns** are per-fish so a single fish can't be retriggered
+  every frame.
+
+`BubbleTrails.jsx` exposes a `spawn(position, direction, intensity)`
+function over a small shared ref (`scatterCtx.bubble`). Scattering
+fish call it once per event; the manager keeps a fixed-size pool of
+`maxBubbles` translucent sprites (one `THREE.Points` draw call) which
+rise, wobble, and shrink over `bubbleLifetime` seconds.
+
+The communication between Fish, ScatterManager, BubbleTrails, and
+FishSchool happens through one mutable ref (`scatterCtx.registry`)
+deliberately — passing fish positions through React state would
+re-render the whole tree every frame.
+
+## Ambient radio
+
+A diegetic beacon in the aquarium (visible cyan orb + halo + small
+orbit dust) plays an ambient SomaFM stream when clicked.
+
+Audio is owned by **`RadioContext.jsx`** (a React context). The
+preferred playback path is:
+
+```
+HTMLAudio  →  MediaElementSource
+           →  [ dry path ]               →
+           →  [ lowpass(950Hz) ]  →  wet  →  master gain  →  destination
+```
+
+`dry` / `wet` crossfade via `underwaterAudioFilterStrength`; `master`
+handles the volume slider and the play/pause **fades** (linear ramp
+over ~0.9s). On `pause()` we ramp `master` to 0, *then* call
+`audio.pause()` so the network stream actually stops after the audio
+has gone silent.
+
+The Web Audio path requires the stream's HTTP response to advertise
+CORS. SomaFM's ice servers don't reliably do so, so on `play()` failure
+we recreate the `<audio>` element *without* `crossOrigin` and try again
+(plus rotate through the station's `fallbacks`). In that fallback mode
+audio still plays, but the filter slider is inert.
+
+`AmbientRadio.jsx` is the 3D piece:
+
+- A small icosahedron lamp + a billboard halo sprite (additive
+  blending — fakes bloom without post-processing)
+- An invisible larger sphere hitbox sits over the visible orb so the
+  click target stays generous despite the orb being small and bobbing
+- An orbiting 24-point particle system around it
+- Fish meshes use `raycast={() => null}` so they never block clicks
+  on the beacon when they swim in front
+
+The DOM **`RadioOverlay.jsx`** renders bottom-left only after first
+interaction. While playing it shows the station name and (if SomaFM's
+JSON endpoint returns one) the current track title; while paused it
+shows a tiny "tap the beacon to resume" hint.
+
+Stations are defined as plain objects in `audio/stations.js`. Adding a
+second station is a config-only change.
+
 ## Performance notes
 
 - Single shared `CanvasTexture` per variant (cached by `getFishTexture`)
@@ -199,6 +312,16 @@ widened to 24 so suspended particles populate the entire visible depth.
   pixel -- ~4 haze planes is comfortable on integrated graphics
 - Per-frame work per fish: ~3 sine evaluations + a couple of mat updates;
   90 fish stays comfortably above 60fps on integrated graphics
+- Scatter state lives inside per-fish `useRef`s; only fish-position
+  mirrors update the shared `scatterCtx.registry` (mutated, never via
+  React state), so 90 fish + 120 bubbles still fits inside the same
+  frame budget
+- Bubbles are a single pooled `THREE.Points` with custom per-bubble
+  `aSize` + `aAlpha` attributes — one draw call, even at `maxBubbles`
+- Radio audio uses native `<audio>` decoding; the optional Web Audio
+  graph is a 4-node chain (source / filter / dry / wet / master) added
+  lazily on first play
 
 No post-processing yet -- the only custom shaders are the two
-atmosphere layers (`BackgroundField` and `WaterHaze`).
+atmosphere layers (`BackgroundField` and `WaterHaze`) and the bubble
+points sprite.
