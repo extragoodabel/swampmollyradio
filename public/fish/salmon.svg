@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 256" width="512" height="256">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#2f4256"/>
+      <stop offset="20%"  stop-color="#5e7c92"/>
+      <stop offset="42%"  stop-color="#a9bdce"/>
+      <stop offset="58%"  stop-color="#d6dee5"/>
+      <stop offset="76%"  stop-color="#cfb0a8"/>
+      <stop offset="100%" stop-color="#6e5a55"/>
+    </linearGradient>
+
+    <linearGradient id="fin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#2f4256" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#6a8197" stop-opacity="0.55"/>
+    </linearGradient>
+
+    <linearGradient id="tail" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#243549" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#5e7c92" stop-opacity="0.95"/>
+    </linearGradient>
+
+    <radialGradient id="eye" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%"   stop-color="#070d14"/>
+      <stop offset="65%"  stop-color="#162130"/>
+      <stop offset="100%" stop-color="#2c3d52"/>
+    </radialGradient>
+
+    <linearGradient id="shine" x1="0" y1="0.42" x2="0" y2="0.80">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="50%"  stop-color="#ffffff" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Body silhouette: streamlined salmon, head pointing right (+X) -->
+  <path d="M 95 128
+           C 95 90, 175 70, 290 76
+           C 380 82, 432 102, 460 124
+           C 472 128, 472 132, 460 136
+           C 432 158, 380 174, 290 180
+           C 175 186, 95 166, 95 128 Z" fill="url(#body)"/>
+
+  <!-- Belly highlight overlay (no extra alpha mask, just multiplied by main body) -->
+  <path d="M 95 128
+           C 95 90, 175 70, 290 76
+           C 380 82, 432 102, 460 124
+           C 472 128, 472 132, 460 136
+           C 432 158, 380 174, 290 180
+           C 175 166, 95 166, 95 128 Z" fill="url(#shine)"/>
+
+  <!-- Forked caudal (tail) fin -->
+  <path d="M 100 128 L 22 74 L 50 128 L 22 182 Z" fill="url(#tail)"/>
+
+  <!-- Dorsal fin -->
+  <path d="M 225 76 Q 268 32 312 78 Q 290 86 268 86 Q 246 84 225 76 Z" fill="url(#fin)"/>
+
+  <!-- Adipose fin (small, just before tail) -->
+  <ellipse cx="158" cy="86" rx="14" ry="5.5" fill="url(#fin)" opacity="0.85"/>
+
+  <!-- Pectoral fin (side, behind head) -->
+  <path d="M 365 148 Q 392 178 370 200 Q 354 178 365 148 Z" fill="url(#fin)" opacity="0.82"/>
+
+  <!-- Pelvic fin (small, mid-belly) -->
+  <path d="M 280 176 Q 300 200 315 178 Q 298 180 280 176 Z" fill="url(#fin)" opacity="0.72"/>
+
+  <!-- Anal fin (bottom near tail) -->
+  <path d="M 185 178 Q 215 212 247 184 Q 215 184 185 178 Z" fill="url(#fin)" opacity="0.8"/>
+
+  <!-- Lateral line -->
+  <path d="M 100 132 Q 200 126 300 128 Q 380 130 430 134"
+        stroke="#2f4256" stroke-width="1.4" fill="none" opacity="0.30"/>
+
+  <!-- Gill arc -->
+  <path d="M 420 108 Q 416 128 420 148"
+        stroke="#2f4256" stroke-width="1.6" fill="none" opacity="0.55"/>
+
+  <!-- Eye -->
+  <circle cx="445" cy="118" r="7" fill="#0e151e" opacity="0.95"/>
+  <circle cx="445" cy="118" r="5.5" fill="url(#eye)"/>
+  <circle cx="446.7" cy="116" r="2" fill="#f5f7fa" opacity="0.7"/>
+
+  <!-- Mouth -->
+  <path d="M 460 132 L 474 134" stroke="#0e151e" stroke-width="1.8"
+        stroke-linecap="round" opacity="0.70"/>
+
+  <!-- Subtle salmon spots on upper body -->
+  <circle cx="240" cy="96"  r="2.4" fill="#2f4256" opacity="0.45"/>
+  <circle cx="288" cy="90"  r="2.0" fill="#2f4256" opacity="0.42"/>
+  <circle cx="332" cy="94"  r="2.4" fill="#2f4256" opacity="0.42"/>
+  <circle cx="378" cy="104" r="2.0" fill="#2f4256" opacity="0.40"/>
+  <circle cx="265" cy="110" r="1.8" fill="#2f4256" opacity="0.36"/>
+  <circle cx="315" cy="112" r="2.0" fill="#2f4256" opacity="0.36"/>
+  <circle cx="358" cy="118" r="1.6" fill="#2f4256" opacity="0.32"/>
+</svg>
