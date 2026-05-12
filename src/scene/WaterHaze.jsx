@@ -48,6 +48,7 @@ const FRAGMENT_SHADER = `
   uniform vec3 uCausticColor;
   uniform float uCausticPower;
   uniform float uAbyssVertFade;
+  uniform float uLuminousOcean;
 
   float hash(vec2 p) {
     p = fract(p * vec2(123.34, 456.21));
@@ -69,9 +70,11 @@ const FRAGMENT_SHADER = `
     vec2 wp = vWorldPos.xy * 0.10;
     vec2 p  = wp * uNoiseScale + uDrift * uTime * uSpeed;
 
-    float n = noise(p) * 0.55
+    float nSharp = noise(p) * 0.55
             + noise(p * 2.3) * 0.30
             + noise(p * 5.0) * 0.15;
+    float nSoft = noise(p) * 0.68 + noise(p * 1.35) * 0.32;
+    float n = mix(nSharp, nSoft, clamp(uLuminousOcean * 1.15, 0.0, 1.0));
 
     // Diagonal caustic streaks, anchored in world coords so they flow
     // across the field rather than scrolling on the plane surface.
@@ -81,8 +84,44 @@ const FRAGMENT_SHADER = `
     band = pow(band, uCausticPower);
     float caustic = band * uCaustic;
 
-    vec3 col = uColor + uCausticColor * caustic * 0.35;
-    float alpha = uOpacity * mix(0.45, 1.0, n) + caustic * uOpacity * 0.5;
+    float band2 = sin((vWorldPos.x * 0.63 - vWorldPos.z * 0.48 + vWorldPos.y * 0.22)
+                    + uTime * 0.31 * uSpeed);
+    band2 = pow(abs(band2) * 0.5 + 0.5, 4.5);
+    caustic += band2 * uCaustic * 0.65 * uLuminousOcean;
+
+    float warmPool = sin(vWorldPos.x * 0.09 + vWorldPos.y * 0.07 + uTime * 0.18);
+    warmPool = pow(clamp(warmPool * 0.5 + 0.5, 0.0, 1.0), 3.2);
+    caustic += warmPool * uCaustic * 0.55 * uLuminousOcean;
+
+    // --- Salmon Days (uLuminousOcean): hide carrier-quad edges; only soft shafts.
+    float edge = max(abs(vUv.x - 0.5), abs(vUv.y - 0.5)) * 2.0;
+    float edgeFeather = pow(1.0 - smoothstep(0.12, 0.92, edge), 2.35);
+
+    float sp = mix(6.2, 3.25, clamp(uLuminousOcean, 0.0, 1.0));
+    float dShaft1 = sin((vWorldPos.x * 0.52 + vWorldPos.y * 0.48 + vWorldPos.z * 0.22) * 0.72
+                      + uTime * 0.26 * uSpeed);
+    dShaft1 = pow(abs(dShaft1) * 0.5 + 0.5, sp);
+    float dShaft2 = sin((vWorldPos.x * -0.38 + vWorldPos.z * 0.44 - vWorldPos.y * 0.16) * 0.88
+                      + uTime * 0.21 * uSpeed);
+    dShaft2 = pow(abs(dShaft2) * 0.5 + 0.5, sp * 0.92);
+    float dShaft3 = sin((vWorldPos.y * 0.61 + vWorldPos.x * -0.29) * 0.65 + uTime * 0.17 * uSpeed);
+    dShaft3 = pow(abs(dShaft3) * 0.5 + 0.5, sp * 1.08);
+    float shaftField = clamp(
+      caustic * 1.08 + dShaft1 * uCaustic * 0.62 + dShaft2 * uCaustic * 0.58 + dShaft3 * uCaustic * 0.42,
+      0.0, 2.2);
+    float shafts = pow(smoothstep(0.04, 0.82, shaftField), 1.38);
+
+    vec3 col = uColor + uCausticColor * caustic * (0.35 + 0.55 * uLuminousOcean);
+
+    float alphaFill = uOpacity * mix(0.45, 1.0, n) + caustic * uOpacity * (0.5 + 0.55 * uLuminousOcean);
+    float alphaOcean = (uOpacity * (0.035 + 0.045 * n)
+      + uOpacity * shafts * (0.68 + 0.28 * uCaustic)) * edgeFeather;
+
+    float alpha = mix(alphaFill, alphaOcean, step(0.5, uLuminousOcean));
+
+    vec3 dimFog = uColor * vec3(0.38, 0.5, 0.62);
+    float beamVis = clamp(shafts * 1.05 + 0.12, 0.0, 1.0);
+    col = mix(col, mix(dimFog, col, beamVis), step(0.5, uLuminousOcean));
 
     if (uAbyssVertFade > 0.001) {
       float below = smoothstep(2.0, -28.0, vWorldPos.y * uAbyssVertFade);
@@ -96,6 +135,7 @@ const FRAGMENT_SHADER = `
 function HazeLayer({
   distance,
   size,
+  planeHeightFrac = 0.7,
   opacityScale,
   drift,
   noiseScale,
@@ -106,6 +146,7 @@ function HazeLayer({
   causticColor,
   causticPower = 6,
   abyssVertFade = 0,
+  luminousOcean = 0,
 }) {
   const matRef = useRef();
 
@@ -121,6 +162,7 @@ function HazeLayer({
       uCausticColor: { value: new THREE.Color(causticColor) },
       uCausticPower: { value: causticPower },
       uAbyssVertFade: { value: abyssVertFade },
+      uLuminousOcean: { value: luminousOcean },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -135,6 +177,7 @@ function HazeLayer({
     u.uSpeed.value = speed;
     u.uCausticPower.value = causticPower;
     u.uAbyssVertFade.value = abyssVertFade;
+    u.uLuminousOcean.value = luminousOcean;
   });
 
   return (
@@ -146,7 +189,7 @@ function HazeLayer({
       frustumCulled={false}
       raycast={() => null}
     >
-      <planeGeometry args={[size, size * 0.7, 1, 1]} />
+      <planeGeometry args={[size, size * planeHeightFrac, 1, 1]} />
       <shaderMaterial
         ref={matRef}
         uniforms={uniforms}
@@ -175,6 +218,8 @@ export default function WaterHaze({
   hazeProfile = 'default',
   causticPower = 6,
   abyssVertFade = 0,
+  /** Salmon Days: stronger warm caustics + secondary beams in the fragment shader. */
+  luminousOcean = 0,
 }) {
   const groupRef = useRef();
 
@@ -191,12 +236,19 @@ export default function WaterHaze({
     const profile =
       hazeProfile === 'salmon'
         ? {
-            distances: [16, 32, 52, 82],
+            // Keep sheets well ahead of the camera so they never read as a
+            // low “ceiling” of quads (Salmon Days only — swamp unchanged).
+            distances: [62, 82, 105, 132, 165, 198],
             distanceMul: 1,
-            sizeMul: 1.08,
-            opacityScaleMul: 0.62,
-            causticMul: 0.12,
-            causticPower: 11,
+            sizeMul: 1.12,
+            /** world-units margin: plane half-extent ≈ distance * mul + bias */
+            fovCoverMul: 2.75,
+            sizeBias: 140,
+            opacityScaleMul: 0.72,
+            causticMul: 1.05,
+            causticPower: 4.1,
+            driftSpeedMul: 1.22,
+            planeHeightFrac: 0.92,
           }
         : hazeProfile === 'swamp'
           ? {
@@ -216,14 +268,28 @@ export default function WaterHaze({
             };
 
     const profileCausticPower = profile.causticPower ?? 6;
+    const driftSpeedMul = profile.driftSpeedMul ?? 1;
 
-    const baseCaustic = [0.05, 0.4, 0.18, 0.05];
+    const baseCaustic =
+      hazeProfile === 'salmon'
+        ? [0.48, 0.62, 0.52, 0.42, 0.38, 0.34]
+        : [0.05, 0.4, 0.18, 0.05];
 
     for (let i = 0; i < layerCount; i++) {
       const tt = layerCount > 1 ? i / (layerCount - 1) : 0;
       const distance =
         (profile.distances[i] ?? 4 + i * 6) * profile.distanceMul;
-      const size = (16 + tt * 70) * profile.sizeMul;
+      // Default sizing (swamp / generic): modest planes close to camera.
+      let size = (16 + tt * 70) * profile.sizeMul;
+      let planeH = 0.7;
+      // Salmon Days: carrier quads must cover the full frustum with margin — the
+      // shader masks visible contribution to diagonal beams only, but geometry
+      // edges must sit far outside the view to avoid rectangular silhouettes.
+      if (hazeProfile === 'salmon') {
+        const cover = distance * profile.fovCoverMul + profile.sizeBias;
+        size = Math.max(cover, (90 + tt * 60) * profile.sizeMul);
+        planeH = profile.planeHeightFrac ?? 0.88;
+      }
       const opacityScale =
         (0.6 + (1 - Math.abs(tt - 0.5) * 1.4) * 0.7) *
         profile.opacityScaleMul;
@@ -239,11 +305,13 @@ export default function WaterHaze({
         id: i,
         distance,
         size,
+        planeHeightFrac: planeH,
         opacityScale,
         drift,
         noiseScale,
         caustic,
         causticPower: profileCausticPower,
+        speedMul: driftSpeedMul,
       });
     }
     return arr;
@@ -263,16 +331,18 @@ export default function WaterHaze({
           key={l.id}
           distance={l.distance}
           size={l.size}
+          planeHeightFrac={l.planeHeightFrac ?? 0.7}
           opacityScale={l.opacityScale}
           drift={l.drift}
           noiseScale={l.noiseScale}
           caustic={l.caustic}
           opacity={opacity}
-          speed={speed}
+          speed={speed * (l.speedMul ?? 1)}
           color={color}
           causticColor={causticColor}
           causticPower={l.causticPower}
           abyssVertFade={abyssVertFade}
+          luminousOcean={luminousOcean}
         />
       ))}
     </group>

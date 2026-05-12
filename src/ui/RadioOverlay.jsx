@@ -11,17 +11,21 @@ import { useRadio } from '../audio/RadioContext.jsx';
  *   - there's an error (shows a single discreet line)
  *
  * Hidden entirely before first interaction so the scene starts clean.
- * The overlay is pointer-events: none so it never intercepts the
- * canvas drag-to-turn.
+ * The overlay shell is pointer-events: none; prev/next glyphs opt in
+ * to pointer events so they don't steal canvas drags elsewhere.
  */
 export default function RadioOverlay() {
   const {
     station,
+    activeStationIndex,
+    dialStationCount,
     isPlaying,
     isLoading,
     hasEverPlayed,
     nowPlaying,
     error,
+    nextStation,
+    previousStation,
   } = useRadio();
 
   // Tiny mount delay so the panel can fade in instead of popping in.
@@ -35,6 +39,18 @@ export default function RadioOverlay() {
   const showPaused = !showActive && hasEverPlayed;
   const showError = !!error && !showActive;
   const visible = mounted && (showActive || showPaused || showError);
+  const showStationNav =
+    mounted && !showError && dialStationCount > 0 && (showActive || showPaused);
+
+  const stationBlock = (
+    <>
+      <div className="radio-overlay__brand">SomaFM</div>
+      <div className="radio-overlay__station">{station.name}</div>
+      <div className="radio-overlay__dial">
+        {activeStationIndex + 1} / {dialStationCount}
+      </div>
+    </>
+  );
 
   return (
     <div className={`radio-overlay ${visible ? 'radio-overlay--visible' : ''}`}>
@@ -43,7 +59,29 @@ export default function RadioOverlay() {
           <div className="radio-overlay__state">
             {isLoading ? 'Tuning in' : 'Now playing'}
           </div>
-          <div className="radio-overlay__station">{station.name}</div>
+          {showStationNav ? (
+            <div className="radio-overlay__stationRow">
+              <button
+                type="button"
+                className="radio-overlay__navGlyph"
+                aria-label="Previous station"
+                onClick={() => previousStation()}
+              >
+                &lt;
+              </button>
+              <div className="radio-overlay__stationCol">{stationBlock}</div>
+              <button
+                type="button"
+                className="radio-overlay__navGlyph"
+                aria-label="Next station"
+                onClick={() => nextStation()}
+              >
+                &gt;
+              </button>
+            </div>
+          ) : (
+            <div className="radio-overlay__stationCol">{stationBlock}</div>
+          )}
           {nowPlaying?.title && (
             <div className="radio-overlay__track">{nowPlaying.title}</div>
           )}
@@ -55,8 +93,35 @@ export default function RadioOverlay() {
         </>
       )}
       {showPaused && !showError && (
+        <>
+          {showStationNav ? (
+            <div className="radio-overlay__stationRow">
+              <button
+                type="button"
+                className="radio-overlay__navGlyph"
+                aria-label="Previous station"
+                onClick={() => previousStation()}
+              >
+                &lt;
+              </button>
+              <div className="radio-overlay__stationCol">{stationBlock}</div>
+              <button
+                type="button"
+                className="radio-overlay__navGlyph"
+                aria-label="Next station"
+                onClick={() => nextStation()}
+              >
+                &gt;
+              </button>
+            </div>
+          ) : (
+            <div className="radio-overlay__stationCol">{stationBlock}</div>
+          )}
+        </>
+      )}
+      {showPaused && !showError && (
         <div className="radio-overlay__hint">
-          Paused · tap the beacon to resume
+          Paused · tap beacon to play/pause
         </div>
       )}
       {showError && (

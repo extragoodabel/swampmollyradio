@@ -35,6 +35,8 @@ export default function Fish({
   position,
   scale = 1,
   speed = 0.4,
+  /** Global swim multiplier from Leva / school (defaults in FishSchool). */
+  swimSpeed = 1,
   direction = 1,
   wiggleSpeed = 4,
   wiggleAmount = 0.18,
@@ -42,7 +44,6 @@ export default function Fish({
   variant = 0,
   bounds,
   opacity = 1,
-  swimSpeed = 1,
   shimmerIntensity = 1,
   shimmerScale = 1,
   shimmerSeed = 0,
@@ -50,7 +51,6 @@ export default function Fish({
   layer = 1,
   extraParallax = 0,
   avoidanceRadius = 1.2,
-  fishDistanceOpacityStrength = 1,
   texture,
   riderTexture,
   isRider = false,
@@ -61,10 +61,16 @@ export default function Fish({
   fishId = 0,
   scatterCtx = null,
   lightBeam = null,
+  /**
+   * Distance-based atmospheric perspective (both themes): blend toward
+   * water / fog color, desaturate, darken — opacity stays solid for occlusion.
+   */
+  heroDepthCue = null,
 }) {
   const group = useRef();
   const body = useRef();
   const material = useRef();
+  const fogScratch = useRef(new THREE.Color());
 
   const fallbackTexture = useMemo(() => getFishTexture(variant), [variant]);
 
@@ -171,6 +177,8 @@ export default function Fish({
   useFrame((rootState, delta) => {
     const s = state.current;
     const d = Math.min(delta, 0.05);
+    const swimMul =
+      Number.isFinite(swimSpeed) && swimSpeed > 0 ? swimSpeed : 1;
     s.t += d;
 
     // Advance scatter state machine FIRST so the rest of the frame can
@@ -212,7 +220,7 @@ export default function Fish({
     // beyond the lateral displacement.
     const swimBoost = 1 + sc.amplitude * 2.2;
 
-    s.x += (direction * speed + cx * 0.35) * d * swimSpeed * swimBoost;
+    s.x += (direction * speed + cx * 0.35) * d * swimMul * swimBoost;
     if (direction > 0 && s.x > bounds.x) s.x = -bounds.x;
     else if (direction < 0 && s.x < -bounds.x) s.x = bounds.x;
 
@@ -357,19 +365,67 @@ export default function Fish({
       }
     }
 
-    const totalBoost = boost + scatterBoost;
+    let depthFade = 0;
+    let heroDist = 0;
+    if (heroDepthCue) {
+      const dx = displayX - cam.x;
+      const dy = displayY - cam.y;
+      const dz = displayZ - cam.z;
+      heroDist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const near = heroDepthCue.nearDist ?? 6;
+      const far = heroDepthCue.farDist ?? 22;
+      depthFade = THREE.MathUtils.smoothstep(heroDist, near, far);
+    }
+
+    const boostAtten = heroDepthCue
+      ? 1 - depthFade * (heroDepthCue.shimmerAtten ?? 0.72)
+      : 1;
+    const totalBoost = (boost + scatterBoost) * boostAtten;
 
     if (material.current) {
-      const fadedOpacity =
-        1 + (opacity - 1) * fishDistanceOpacityStrength;
-      material.current.opacity = Math.min(
-        1,
-        fadedOpacity + totalBoost * 0.4 + beamLight * 0.22,
-      );
+      const fogC = fogScratch.current;
+      if (heroDepthCue?.fogColor != null) {
+        fogC.set(heroDepthCue.fogColor);
+      } else {
+        fogC.setRGB(0.05, 0.08, 0.12);
+      }
+      const t = depthFade;
+      const desatAmt = (heroDepthCue?.desaturate ?? 0.72) * t;
+      const fogBlend = (heroDepthCue?.fogBlend ?? 0.84) * t;
+      const darkenK = (heroDepthCue?.darken ?? 0.62) * t;
+      const silver = heroDepthCue?.silverGlint ?? 0;
+
+      let r = baseColor.r;
+      let g = baseColor.g;
+      let b = baseColor.b;
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      r = THREE.MathUtils.lerp(r, lum, desatAmt);
+      g = THREE.MathUtils.lerp(g, lum, desatAmt);
+      b = THREE.MathUtils.lerp(b, lum, desatAmt);
+
+      r = THREE.MathUtils.lerp(r, fogC.r, fogBlend);
+      g = THREE.MathUtils.lerp(g, fogC.g, fogBlend);
+      b = THREE.MathUtils.lerp(b, fogC.b, fogBlend);
+
+      const darkMul = 1 - darkenK;
+      r *= darkMul;
+      g *= darkMul;
+      b *= darkMul;
+
+      if (silver > 0 && t > 0.08) {
+        const glint =
+          Math.sin(s.t * 2.35 + fishId * 1.19 + heroDist * 0.13) * 0.5 + 0.5;
+        const kick = Math.pow(glint, 14) * silver * t;
+        r += kick * 0.85;
+        g += kick * 0.92;
+        b += kick;
+      }
+
+      material.current.opacity = 1;
       material.current.color.setRGB(
-        Math.min(1, baseColor.r + totalBoost * 0.45 + beamLight * 0.52),
-        Math.min(1, baseColor.g + totalBoost * 0.45 + beamLight * 0.5),
-        Math.min(1, baseColor.b + totalBoost * 0.45 + beamLight * 0.48),
+        Math.min(1, r + totalBoost * 0.45 + beamLight * 0.52),
+        Math.min(1, g + totalBoost * 0.45 + beamLight * 0.5),
+        Math.min(1, b + totalBoost * 0.45 + beamLight * 0.48),
       );
     }
     if (group.current) {
@@ -405,12 +461,12 @@ export default function Fish({
           // that hover near the threshold flicker on and off as
           // the fish moves sub-pixel amounts close to the camera.
           // 0.2 still hides the soft anti-alias halo of the WebP
-          // sprites without pop. `transparent` stays on so the
-          // per-fish opacity fade + shimmer envelope still
-          // modulate the sprite as a whole.
+          // Transparent sprites: keep depthWrite off so stacking and
+          // sorting stay stable (depthWrite on + transparent billboards
+          // can collapse the whole school into an opaque depth wall).
           transparent
           alphaTest={0.2}
-          opacity={opacity}
+          opacity={1}
           depthWrite={false}
           side={THREE.DoubleSide}
           toneMapped={false}

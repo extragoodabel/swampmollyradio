@@ -49,12 +49,27 @@ canvas:active {
   opacity: 0.55;
 }
 
+.overlay__bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px 32px;
+  align-items: end;
+  width: 100%;
+  padding-top: 8px;
+}
+
 .overlay__hint {
-  align-self: flex-end;
+  justify-self: end;
+  max-width: min(380px, 100%);
   font-size: 11px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
   opacity: 0.35;
+  text-align: right;
+  line-height: 1.45;
+  hyphens: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 .vignette {
@@ -67,6 +82,46 @@ canvas:active {
     rgba(0, 0, 0, 0.55) 100%
   );
   z-index: 5;
+}
+
+/* Salmon Days root-cause debug: minimal scene mode (`?aqsalmonemergency=1`). */
+.salmon-emergency-banner {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  max-width: min(560px, calc(100vw - 24px));
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  color: rgba(255, 235, 220, 0.92);
+  background: rgba(80, 24, 12, 0.88);
+  border: 1px solid rgba(255, 160, 120, 0.45);
+  pointer-events: none;
+  text-align: center;
+}
+
+.salmon-emergency-banner code {
+  font-size: 10px;
+  opacity: 0.95;
+}
+
+.scene-crash-overlay__stack {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 28vh;
+  overflow: auto;
+  background: rgba(0, 20, 40, 0.45);
+  border-radius: 6px;
+  color: rgba(200, 230, 250, 0.88);
+  border: 1px solid rgba(100, 160, 200, 0.25);
 }
 
 /* Soft palette bridge between atmosphere modes (above canvas, under chrome). */
@@ -109,12 +164,39 @@ canvas:active {
   color: rgba(160, 210, 225, 0.55);
 }
 
+.radio-overlay__stationRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 4px;
+  pointer-events: none;
+}
+
+.radio-overlay__stationCol .radio-overlay__brand {
+  margin-top: 0;
+}
+
+.radio-overlay__brand {
+  font-size: 8px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(145, 200, 218, 0.45);
+}
+
 .radio-overlay__station {
   margin-top: 6px;
   font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: rgba(220, 240, 250, 0.92);
+}
+
+.radio-overlay__dial {
+  margin-top: 5px;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(150, 198, 215, 0.45);
 }
 
 .radio-overlay__track {
@@ -130,6 +212,33 @@ canvas:active {
   font-style: italic;
 }
 
+.radio-overlay__stationCol {
+  flex: 1;
+  min-width: 0;
+}
+
+.radio-overlay__navGlyph {
+  pointer-events: auto;
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin: 0;
+  padding: 0 2px;
+  margin-top: 1px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  letter-spacing: 0;
+  color: rgba(155, 200, 215, 0.5);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.radio-overlay__navGlyph:hover {
+  color: rgba(210, 238, 248, 0.78);
+}
+
 .radio-overlay__hint {
   font-size: 10px;
   letter-spacing: 0.24em;
@@ -141,26 +250,22 @@ canvas:active {
   color: rgba(245, 175, 175, 0.7);
 }
 
-/* Compact atmosphere switch — single line, minimal chrome. */
+/* Portal link to the other aquarium — lives in .overlay__bottom grid. */
 .theme-mode {
-  position: fixed;
-  bottom: 24px;
-  left: 28px;
-  z-index: 12;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5em 0.65em;
-  max-width: min(420px, calc(100vw - 56px));
+  position: relative;
+  /* Above Leva (often 1000+) so the mode link stays clickable */
+  z-index: 50000;
+  justify-self: start;
+  max-width: 100%;
   pointer-events: auto;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(170, 210, 225, 0.5);
+  color: rgba(170, 210, 225, 0.55);
 }
 
-.theme-mode__btn {
+.theme-mode__link {
   margin: 0;
   padding: 0;
   border: none;
@@ -169,28 +274,163 @@ canvas:active {
   font-weight: 800;
   letter-spacing: inherit;
   text-transform: inherit;
-  color: rgba(175, 215, 230, 0.42);
+  color: rgba(175, 215, 230, 0.5);
   cursor: pointer;
   text-align: left;
   text-decoration: none;
   text-underline-offset: 0.22em;
   transition: color 180ms ease, opacity 180ms ease;
+  max-width: 100%;
 }
 
-.theme-mode__btn:hover,
-.theme-mode__btn:focus-visible {
+.theme-mode__link:hover,
+.theme-mode__link:focus-visible {
   outline: none;
-  color: rgba(220, 245, 255, 0.82);
-}
-
-.theme-mode__btn--active {
-  color: rgba(235, 250, 255, 0.95);
+  color: rgba(220, 245, 255, 0.88);
   text-decoration: underline;
   text-decoration-thickness: 1px;
 }
 
-.theme-mode__sep {
-  opacity: 0.45;
-  font-weight: 700;
-  user-select: none;
+.theme-mode__arrow {
+  font-weight: 800;
+  opacity: 0.85;
+}
+
+@media (max-width: 720px) {
+  .overlay {
+    padding: 24px 20px 22px;
+  }
+
+  .overlay__bottom {
+    gap: 14px 24px;
+    padding-top: 12px;
+  }
+
+  .overlay__hint {
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    max-width: min(320px, 100%);
+  }
+
+  .theme-mode {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 520px) {
+  .overlay {
+    padding: 20px 16px 18px;
+  }
+
+  .overlay__bottom {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    align-items: start;
+    padding-top: 10px;
+  }
+
+  .overlay__hint {
+    justify-self: start;
+    text-align: left;
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    max-width: 100%;
+    order: 2;
+  }
+
+  .theme-mode {
+    order: 1;
+    font-size: 10px;
+  }
+}
+
+/* Full-screen diagnostic when the Canvas tree fails after one remount (theme unchanged). */
+.scene-crash-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(2, 8, 16, 0.88);
+  pointer-events: auto;
+}
+
+.scene-crash-overlay__panel {
+  max-width: min(640px, 100%);
+  max-height: min(82vh, 100%);
+  overflow: auto;
+  padding: 22px 24px;
+  border-radius: 10px;
+  background: rgba(12, 22, 32, 0.95);
+  border: 1px solid rgba(120, 180, 220, 0.35);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+
+.scene-crash-overlay__title {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(230, 245, 255, 0.95);
+}
+
+.scene-crash-overlay__meta {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.45;
+  opacity: 0.88;
+  color: rgba(200, 230, 245, 0.9);
+}
+
+.scene-crash-overlay__meta code {
+  font-size: 11px;
+  opacity: 0.95;
+}
+
+.scene-crash-overlay__err {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  color: rgba(255, 220, 210, 0.92);
+  border: 1px solid rgba(255, 120, 90, 0.22);
+}
+
+.scene-crash-overlay__hint {
+  margin: 0 0 16px;
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0.78;
+  color: rgba(190, 220, 235, 0.88);
+}
+
+.scene-crash-overlay__hint code {
+  font-size: 10px;
+  opacity: 0.95;
+}
+
+.scene-crash-overlay__retry {
+  display: inline-block;
+  padding: 10px 18px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border: 1px solid rgba(140, 200, 230, 0.5);
+  border-radius: 6px;
+  background: rgba(40, 90, 120, 0.55);
+  color: rgba(230, 250, 255, 0.96);
+}
+
+.scene-crash-overlay__retry:hover,
+.scene-crash-overlay__retry:focus-visible {
+  outline: none;
+  background: rgba(55, 110, 145, 0.72);
 }

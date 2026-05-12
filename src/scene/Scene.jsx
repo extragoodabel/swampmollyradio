@@ -1,9 +1,8 @@
 import { useThree } from '@react-three/fiber';
-import { Suspense, useEffect, useMemo } from 'react';
-import { useControls, folder } from 'leva';
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useControls, folder, button } from 'leva';
 import * as THREE from 'three';
 import CameraRig from './CameraRig.jsx';
-import FishSchool from './FishSchool.jsx';
 import WebpFishSchool from './WebpFishSchool.jsx';
 import SalmonSvgFallback from './SalmonSvgFallback.jsx';
 import DustParticles from './DustParticles.jsx';
@@ -11,19 +10,57 @@ import AmbientBubbles from './AmbientBubbles.jsx';
 import BackgroundField from './BackgroundField.jsx';
 import WaterHaze from './WaterHaze.jsx';
 import SalmonOceanVault from './SalmonOceanVault.jsx';
-import AmbientRadio from './AmbientRadio.jsx';
+import SalmonOceanCanopy from './SalmonOceanCanopy.jsx';
+import AmbientCompanionSchools from './AmbientCompanionSchools.jsx';
 import MidfieldSchool from './MidfieldSchool.jsx';
 import BackgroundFishClouds from './BackgroundFishClouds.jsx';
+import SalmonSatelliteSchools from './SalmonSatelliteSchools.jsx';
+import SalmonShadowFishSilhouettes from './SalmonShadowFishSilhouettes.jsx';
 import SurfacePlane from './SurfacePlane.jsx';
 import Seabed from './Seabed.jsx';
 import KelpForest from './KelpForest.jsx';
 import SwampSunkenCar from './SwampSunkenCar.jsx';
+import SwampSunkenFiatPanda from './SwampSunkenFiatPanda.jsx';
 import LightBeam from './LightBeam.jsx';
+import AmbientRadio from './AmbientRadio.jsx';
 import FloatingLetters from './FloatingLetters.jsx';
+import CanvasFloatingLetters from './CanvasFloatingLetters.jsx';
+import TypoEmergencyTest from './TypoEmergencyTest.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import { useRadio } from '../audio/RadioContext.jsx';
 import { useTheme } from '../theme/ThemeContext.jsx';
-import { resolveRadioSlotIndex } from '../theme/themes.js';
+import { getTheme, resolveRadioSlotIndex } from '../theme/themes.js';
+import {
+  buildSalmonEnvForScene,
+  getSalmonEnv,
+  getSalmonRestoreStep,
+  SALMON_ENV,
+  SALMON_RESTORE_FULL,
+} from '../theme/salmonRecovery.js';
+import { buildSwampSceneGates } from '../theme/swampRecovery.js';
+import AquariumEngineDebug from '../debug/AquariumEngineDebug.jsx';
+import {
+  AQ_DEBUG,
+  AQ_LITE_ATMOSPHERE,
+  AQ_SKIP_TYPOGRAPHY,
+  AQ_TYPO_DEBUG_LOG,
+  AQ_TYPO_TEST,
+  AQ_TYPO_TROIKA,
+  AQ_SCENE_MINIMAL,
+} from '../debug/aquariumRecovery.js';
+import { logRecoveryLayer } from '../debug/recoveryLayerLog.js';
+import { reportSceneMountPhase } from '../debug/sceneMountTrace.js';
+import EmergencyFishSchool from './EmergencyFishSchool.jsx';
+import {
+  buildLevaSanitizePatch,
+  guardCameraRails,
+  guardClusterCount,
+  guardHeroFishCount,
+  guardHazeLayerCount,
+  guardSchoolSpread,
+  guardSwimSpeed,
+  guardVolumeFog,
+} from './runtimeGuards.js';
 
 const VOLUME = { x: 16, y: 5.5, z: 18 };
 const DUST_VOLUME = { x: 20, y: 9, z: 24 };
@@ -57,12 +94,46 @@ function typographyFramingCameraZ(text, letterSpacing, vFovDegrees, aspect) {
     distance = Math.max(distW, distH);
   }
 
-  return THREE.MathUtils.clamp(distance, 6.25, 14.5);
+  return THREE.MathUtils.clamp(distance, 6.25, 16.25);
 }
 
 export default function Scene() {
   const { scene, camera, size } = useThree();
   const { theme, themeId } = useTheme();
+
+  const salmonEnv = useMemo(() => buildSalmonEnvForScene(themeId), [themeId]);
+  const salmonRestoreStep = useMemo(
+    () =>
+      themeId === 'salmonDaysRadio'
+        ? getSalmonRestoreStep()
+        : SALMON_RESTORE_FULL,
+    [themeId],
+  );
+  const swampGates = useMemo(() => buildSwampSceneGates(themeId), [themeId]);
+
+  useEffect(() => {
+    if (themeId !== 'salmonDaysRadio' || salmonRestoreStep < 13) return;
+    console.info(
+      '[aquarium] Salmon restore step ≥13 — credits/coin hook (no 3D asset in repo yet)',
+    );
+  }, [themeId, salmonRestoreStep]);
+
+  useEffect(() => {
+    if (themeId !== 'swamp' || swampGates.rs < 13) return;
+    logRecoveryLayer('swamp', 'extras-credits', {
+      note: 'No credits coin mesh in repo; hook reserved',
+    });
+  }, [themeId, swampGates.rs]);
+
+  useEffect(() => {
+    reportSceneMountPhase(`Scene.full:${themeId}`);
+  }, [themeId]);
+
+  useEffect(() => {
+    camera.near = 0.05;
+    camera.far = 12000;
+    camera.updateProjectionMatrix();
+  }, [camera]);
 
   const [{
     heroFishCount,
@@ -82,7 +153,6 @@ export default function Scene() {
     swimSpeed,
     shimmerIntensity,
     foregroundCrossingChance,
-    fishDistanceOpacityStrength,
     scatterEnabled,
     randomScatterFrequency,
     scatterRadius,
@@ -195,7 +265,6 @@ export default function Scene() {
       swimSpeed: { value: 1.0, min: 0.0, max: 3.0, step: 0.05 },
       shimmerIntensity: { value: 1.0, min: 0.0, max: 3.0, step: 0.05 },
       foregroundCrossingChance: { value: 0.18, min: 0, max: 0.5, step: 0.01 },
-      fishDistanceOpacityStrength: { value: 0.4, min: 0, max: 1, step: 0.05 },
     }),
     density: folder({
       // Master toggle for the surround-density layers (midfield +
@@ -233,10 +302,9 @@ export default function Scene() {
       // layers. Use this to fade the entire density system up or
       // down together without touching individual sliders.
       atmosphericDensity: { value: 0.6, min: 0, max: 2, step: 0.05 },
-      // Boosts the hero school's visual dominance by fading distant
-      // fish more (lower opacity, smaller scale) as this rises.
-      // 1.0 = neutral. The default of 1.4 nudges focus back to the
-      // hero layer.
+      // Boosts hero visual dominance by strengthening distant *atmospheric*
+      // silhouette / fog crush (see MidfieldSchool `uAtmosphereCrush`), not
+      // by lowering distant alpha.
       heroFishDominance: { value: 1.4, min: 0.5, max: 3, step: 0.05 },
     }),
     scatter: folder({
@@ -255,9 +323,10 @@ export default function Scene() {
     camera: folder({
       hoverParallaxStrength: { value: 1.0, min: 0.0, max: 2.5, step: 0.05 },
       scrollDepthStrength: { value: 1.0, min: 0.0, max: 3.0, step: 0.05 },
-      cameraZMin: { value: -6, min: -16, max: 0, step: 0.5 },
+      // Wider Z rails so open-ocean + sunken-car exploration fit inside Leva.
+      cameraZMin: { value: -6, min: -36, max: 2, step: 0.5 },
       // High enough that typography-framed starts stay inside the range.
-      cameraZMax: { value: 15, min: 1, max: 22, step: 0.5 },
+      cameraZMax: { value: 15, min: 1, max: 96, step: 0.5 },
       idleSway: { value: 1.0, min: 0.0, max: 3.0, step: 0.05 },
       cameraAvoidanceRadius: { value: 1.2, min: 0.0, max: 4.0, step: 0.1 },
     }),
@@ -280,8 +349,10 @@ export default function Scene() {
       // Theme defaults are applied on mode switch via `setLeva`
       // (see effect below); the schema captures the first-loaded theme.
       fogColor: { value: theme.water.fogColor },
-      fogNear: { value: theme.water.fogNear, min: 0, max: 20, step: 0.5 },
-      fogFar: { value: theme.water.fogFar, min: 10, max: 60, step: 1 },
+      // Wide rails: Salmon Days uses fogFar > 120; caps were clamping
+      // theme patches and encouraging accidental ultra-tight fog bands.
+      fogNear: { value: theme.water.fogNear, min: 0, max: 80, step: 0.5 },
+      fogFar: { value: theme.water.fogFar, min: 8, max: 220, step: 1 },
       waterHazeOpacity: {
         value: theme.water.waterHazeOpacity,
         min: 0,
@@ -482,19 +553,18 @@ export default function Scene() {
       riderSalmonCanScatter: { value: true },
     }),
     letters: folder({
-      // Master toggle for the floating "abelcharrow" typography.
+      // Master toggle for floating environmental typography.
       floatingLettersEnabled: { value: true },
       // SDF text fontSize. Kept small so even letters that drift
       // close to the camera don't dominate the frame.
-      letterScale: { value: 0.3, min: 0.08, max: 1.4, step: 0.01 },
+      letterScale: { value: 0.34, min: 0.08, max: 1.4, step: 0.01 },
       // Base fillOpacity (combined with shimmer pulse + beam catch
       // + haze fade per frame). Default balances murk with readability
       // at the typography-framed opening camera distance.
-      letterOpacity: { value: 0.54, min: 0.05, max: 1, step: 0.01 },
-      // Per-letter z jitter range. Pushed to 7.0 -- some letters
-      // sit deep in the haze, others drift just in front of the
-      // school, separating the name across the water column.
-      letterDepthSpread: { value: 7.0, min: 0, max: 14, step: 0.1 },
+      letterOpacity: { value: 0.7, min: 0.05, max: 1, step: 0.01 },
+      // Per-letter z range: theme layout uses a shallow ordered arc +
+      // jitter so phrases stay readable; this caps overall depth feel.
+      letterDepthSpread: { value: 4.6, min: 0, max: 14, step: 0.1 },
       // Horizontal step between letter centres. Also drives the Y
       // jitter (see FloatingLetters.jsx).
       letterSpacing: { value: 1.2, min: 0.3, max: 3.5, step: 0.05 },
@@ -504,7 +574,7 @@ export default function Scene() {
       letterMurkiness: { value: 0.78, min: 0, max: 1, step: 0.01 },
       // Multi-sine broken shimmer amplitude on fillOpacity. Drives
       // the "uneven highlight" feel rather than a clean pulse.
-      letterShimmerStrength: { value: 0.55, min: 0, max: 2, step: 0.05 },
+      letterShimmerStrength: { value: 0.64, min: 0, max: 2, step: 0.05 },
       // Amplitude of the current-driven swish: position drift +
       // X-flap / Y-twist / Z-tilt + tiny vertical flutter all
       // scale with this. Higher = more cloth-like motion.
@@ -567,31 +637,421 @@ export default function Scene() {
       kelpSwaySpeed: { value: 0.6, min: 0, max: 2, step: 0.05 },
       kelpOpacity: { value: 0.55, min: 0, max: 1, step: 0.01 },
       // Fraction of kelp strands rendered as broad moss clumps
-      // rather than slim spiraling ribbons. Initial value follows
-      // the active theme (0.35 in swamp, 0 in Salmon Days Radio); user can
-      // still scrub manually after theme load.
+      // rather than slim spiraling ribbons. Swamp ~0.42; Salmon Days keeps
+      // 0 — kelp layer is not mounted in open-water mode.
       kelpMossRatio: { value: theme.kelp.mossRatio, min: 0, max: 1, step: 0.01 },
     }),
+    recovery: folder({
+      '— Reset Leva storage —': button(() => {
+        try {
+          const keys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.toLowerCase().includes('leva')) keys.push(k);
+          }
+          keys.forEach((key) => localStorage.removeItem(key));
+        } catch (_) {
+          /* ignore */
+        }
+        window.location.reload();
+      }),
+    }),
   }), []);
+
+  // Default ON when Leva omits the key (`undefined && …` was falsy — hid letters forever).
+  const mountFloatingLetters =
+    floatingLettersEnabled !== false &&
+    floatingLettersEnabled !== 'false' &&
+    !AQ_SKIP_TYPOGRAPHY;
+
+  const mountLettersEffective =
+    mountFloatingLetters &&
+    (themeId !== 'salmonDaysRadio' || salmonRestoreStep >= 2) &&
+    (themeId !== 'swamp' || swampGates.typography);
 
   // Initial `value:` defaults above are captured on first Scene mount.
   // Theme switches do NOT remount Scene (camera + schools stay live);
   // instead the effect below pushes fog/haze/beam/kelp moss whenever
   // `themeId` changes, so Leva and shaders track the new atmosphere.
 
-  const radioInTypography = useMemo(() => {
-    const idx = resolveRadioSlotIndex(
+  const radioSlotIndex = useMemo(
+    () => resolveRadioSlotIndex(theme.letters.text, theme.letters.radioSlot),
+    [theme.letters.text, theme.letters.radioSlot],
+  );
+
+  const radioInTypography = useMemo(
+    () =>
+      ambientRadioEnabled &&
+      mountLettersEffective &&
+      radioSlotIndex != null &&
+      (themeId !== 'salmonDaysRadio' || salmonRestoreStep >= 3) &&
+      (themeId !== 'swamp' || swampGates.orb),
+    [
+      ambientRadioEnabled,
+      mountLettersEffective,
+      radioSlotIndex,
+      themeId,
+      salmonRestoreStep,
+      swampGates.orb,
+    ],
+  );
+
+  const standaloneAmbientRadioShows = useMemo(
+    () =>
+      !radioInTypography &&
+      ambientRadioEnabled &&
+      (themeId !== 'salmonDaysRadio' || salmonRestoreStep >= 3) &&
+      (themeId !== 'swamp' || swampGates.orb),
+    [
+      radioInTypography,
+      ambientRadioEnabled,
+      themeId,
+      salmonRestoreStep,
+      swampGates.orb,
+    ],
+  );
+
+  const safeLetterOpacity = useMemo(() => {
+    const o = Number(letterOpacity);
+    if (!Number.isFinite(o)) return 0.58;
+    return THREE.MathUtils.clamp(o, 0.22, 1);
+  }, [letterOpacity]);
+
+  const safeRadioGlowIntensity = useMemo(() => {
+    const g = Number(radioGlowIntensity);
+    if (!Number.isFinite(g)) return 1;
+    return THREE.MathUtils.clamp(g, 0.4, 4);
+  }, [radioGlowIntensity]);
+
+  const typographyWorldYOffset =
+    Number(theme.letters.typographyWorldYOffset) || 0;
+
+  const floatingTypographyProps = useMemo(
+    () => {
+      const tr = theme.letters.typographyReadability;
+      const ax = tr?.anchor?.[0] ?? 0;
+      const ay = (tr?.anchor?.[1] ?? 0) + typographyWorldYOffset;
+      const az = tr?.anchor?.[2] ?? 0;
+      return {
+      text: theme.letters.text,
+      depthSpread: letterDepthSpread,
+      floatStrength: letterFloatStrength,
+      shimmerStrength: letterShimmerStrength,
+      opacity: safeLetterOpacity,
+      scale: letterScale,
+      spacing: letterSpacing * (theme.letters.letterSpacingMul ?? 1),
+      murkiness: Math.min(
+        1,
+        letterMurkiness + (theme.letters.letterMurkinessBoost ?? 0),
+      ),
+      rowGapMul: theme.letters.rowGapMul ?? 1,
+      intraLineYJitterMul: theme.letters.intraLineYJitterMul ?? 1,
+      interRowJitterMul: theme.letters.interRowJitterMul ?? 0,
+      lineXJitterMul: theme.letters.lineXJitterMul ?? 1,
+      floatLayout: theme.letters.floatLayout,
+      beam: {
+        enabled:
+          lightBeamEnabled &&
+          (themeId === 'salmonDaysRadio'
+            ? salmonRestoreStep >= 8
+            : themeId === 'swamp' && swampGates.lightBeam),
+        position: [beamPositionX, beamPositionY, beamPositionZ],
+        angleDegrees: beamAngle,
+        width: beamWidth,
+        length: beamLength,
+        regionSize: beamRegionSize,
+      },
+      radioSlot: theme.letters.radioSlot,
+      radioEmbedded: radioInTypography,
+      radioGlowIntensity: safeRadioGlowIntensity,
+      beaconAtmosphere: theme.radio?.beaconAtmosphere,
+      typographyReadability: tr
+        ? { ...tr, anchor: [ax, ay, az] }
+        : tr,
+      typographyTint: theme.letters.typographyTint ?? null,
+      safeClampZ: 4.25,
+    };
+    },
+    [
       theme.letters.text,
+      theme.letters.letterSpacingMul,
+      theme.letters.rowGapMul,
+      theme.letters.intraLineYJitterMul,
+      theme.letters.interRowJitterMul,
+      theme.letters.lineXJitterMul,
+      theme.letters.floatLayout,
       theme.letters.radioSlot,
-    );
-    return (
-      ambientRadioEnabled && floatingLettersEnabled && idx != null
-    );
+      theme.letters.typographyReadability,
+      theme.letters.typographyTint,
+      theme.letters.letterMurkinessBoost,
+      theme.radio?.beaconAtmosphere,
+      letterDepthSpread,
+      letterFloatStrength,
+      letterShimmerStrength,
+      safeLetterOpacity,
+      letterScale,
+      letterSpacing,
+      letterMurkiness,
+      lightBeamEnabled,
+      themeId,
+      salmonRestoreStep,
+      swampGates.lightBeam,
+      beamPositionX,
+      beamPositionY,
+      beamPositionZ,
+      beamAngle,
+      beamWidth,
+      beamLength,
+      beamRegionSize,
+      radioInTypography,
+      safeRadioGlowIntensity,
+      typographyWorldYOffset,
+    ],
+  );
+
+  useEffect(() => {
+    if (!AQ_TYPO_DEBUG_LOG || !mountLettersEffective) return;
+    console.info('[aquarium] Scene typography', {
+      activeTheme: themeId,
+      phrase: theme.letters.text,
+      canvasFallbackDefault: !AQ_TYPO_TROIKA,
+    });
+  }, [themeId, theme.letters.text, mountLettersEffective]);
+
+  const safeRadioPosition = useMemo(() => {
+    const x = Number(radioPosition?.x);
+    const y = Number(radioPosition?.y);
+    const z = Number(radioPosition?.z);
+    return [
+      Number.isFinite(x) ? x : 3,
+      Number.isFinite(y) ? y : 0.6,
+      Number.isFinite(z) ? z : -4.5,
+    ];
+  }, [radioPosition]);
+
+  useEffect(() => {
+    const restoreOn =
+      (themeId === 'swamp' && swampGates.active) ||
+      (themeId === 'salmonDaysRadio' && salmonRestoreStep < SALMON_RESTORE_FULL);
+    if (!restoreOn) return;
+
+    let parsedAquariumtheme = null;
+    let parsedAqswamprestore = null;
+    let parsedAqsalmonrestore = null;
+    try {
+      const u = new URLSearchParams(window.location.search);
+      parsedAquariumtheme = u.get('aquariumtheme');
+      parsedAqswamprestore = u.get('aqswamprestore');
+      parsedAqsalmonrestore = u.get('aqsalmonrestore');
+    } catch {
+      /* ignore */
+    }
+
+    const salmonEnvAfterKill = getSalmonEnv();
+
+    const SWAMP_LAYER_MIN = {
+      background: 1,
+      typography: 2,
+      orb: 3,
+      particles: 4,
+      bubbles: 4,
+      waterHaze: 5,
+      surface: 6,
+      seabed: 6,
+      kelp: 7,
+      lightBeam: 8,
+      car1: 9,
+      car2: 10,
+      companions: 12,
+      density: 12,
+    };
+
+    const swampLayerGates = {};
+    if (themeId === 'swamp') {
+      const killMap = [
+        ['background', 'backdrop'],
+        ['waterHaze', 'haze'],
+        ['typography', 'typography'],
+        ['orb', 'orb'],
+        ['particles', 'particles'],
+        ['bubbles', 'bubbles'],
+        ['surface', 'surface'],
+        ['seabed', 'seabed'],
+        ['kelp', 'vegetation'],
+        ['lightBeam', 'lightbeam'],
+        ['car1', 'car1'],
+        ['car2', 'car2'],
+        ['companions', 'companions'],
+        ['density', 'density'],
+      ];
+      for (const [layer, killKey] of killMap) {
+        const on = swampGates[layer];
+        let status;
+        if (on) status = 'mount';
+        else if (swampGates.kill[killKey]) status = 'killed_by_query';
+        else if (
+          swampGates.active &&
+          swampGates.rs < (SWAMP_LAYER_MIN[layer] ?? 99)
+        ) {
+          status = 'skipped_low_step';
+        } else {
+          status = 'skipped_low_step';
+        }
+        swampLayerGates[layer] = { status, gate: on };
+      }
+      let hlStatus;
+      if (swampGates.car1Headlights) hlStatus = 'mount';
+      else if (swampGates.kill.headlights) hlStatus = 'killed_by_query';
+      else if (swampGates.active && swampGates.rs < 11) {
+        hlStatus = 'skipped_low_step';
+      } else if (!swampGates.car1) hlStatus = 'skipped_low_step';
+      else hlStatus = 'skipped_low_step';
+      swampLayerGates.car1Headlights = {
+        status: hlStatus,
+        gate: swampGates.car1Headlights,
+      };
+    }
+
+    const SALMON_LAYER_MIN = {
+      vault: 5,
+      waterHaze: 6,
+      distantSilhouettes: 7,
+      backdrop: 9,
+      satelliteSchools: 10,
+      densityCloudsMidfield: 11,
+      canopy: 12,
+    };
+
+    const salmonLayerGates = {};
+    if (themeId === 'salmonDaysRadio') {
+      for (const key of Object.keys(salmonEnv)) {
+        const on = !!salmonEnv[key];
+        let status;
+        if (on) status = 'mount';
+        else if (!SALMON_ENV[key]) status = 'disabled_by_env';
+        else if (!salmonEnvAfterKill[key]) status = 'killed_by_query';
+        else if (
+          SALMON_LAYER_MIN[key] != null &&
+          salmonRestoreStep < SALMON_LAYER_MIN[key]
+        ) {
+          status = 'skipped_low_step';
+        } else {
+          status = 'skipped_low_step';
+        }
+        salmonLayerGates[key] = { status, gate: on };
+      }
+    }
+
+    const typoEnvOff =
+      AQ_SKIP_TYPOGRAPHY ||
+      floatingLettersEnabled === false ||
+      floatingLettersEnabled === 'false';
+
+    const typographyFinalStatus = (() => {
+      if (mountLettersEffective) return 'mount';
+      if (typoEnvOff) return 'disabled_by_env';
+      if (themeId === 'swamp' && swampGates.kill.typography) {
+        return 'killed_by_query';
+      }
+      if (themeId === 'swamp' && swampGates.active && swampGates.rs < 2) {
+        return 'skipped_low_step';
+      }
+      if (
+        themeId === 'salmonDaysRadio' &&
+        salmonRestoreStep < SALMON_RESTORE_FULL &&
+        salmonRestoreStep < 2
+      ) {
+        return 'skipped_low_step';
+      }
+      if (themeId === 'swamp' && !swampGates.typography) {
+        return 'skipped_low_step';
+      }
+      return 'skipped_low_step';
+    })();
+
+    const activeRestoreEnv =
+      themeId === 'swamp'
+        ? {
+            mode: 'swamp',
+            aqswamprestore: swampGates.rs,
+            aqswampkill: swampGates.kill,
+            gates: {
+              background: swampGates.background,
+              waterHaze: swampGates.waterHaze,
+              typography: swampGates.typography,
+              orb: swampGates.orb,
+              particles: swampGates.particles,
+              bubbles: swampGates.bubbles,
+              surface: swampGates.surface,
+              seabed: swampGates.seabed,
+              kelp: swampGates.kelp,
+              lightBeam: swampGates.lightBeam,
+              car1: swampGates.car1,
+              car2: swampGates.car2,
+              car1Headlights: swampGates.car1Headlights,
+              companions: swampGates.companions,
+              density: swampGates.density,
+            },
+          }
+        : {
+            mode: 'salmon',
+            aqsalmonrestore: salmonRestoreStep,
+            salmonEnvLayerGates: salmonEnv,
+            salmonEnvAfterAqsalmonkill: salmonEnvAfterKill,
+            SALMON_ENV_template: { ...SALMON_ENV },
+          };
+
+    console.info('[aquarium-restore] progression', {
+      parsedUrlAquariumtheme: parsedAquariumtheme,
+      canonicalThemeId: themeId,
+      themeResolvesCanonicalMismatch:
+        parsedAquariumtheme != null &&
+        String(parsedAquariumtheme).trim() !== themeId,
+      parsedAqswamprestore,
+      parsedAqsalmonrestore,
+      effectiveSwampRestoreStep: themeId === 'swamp' ? swampGates.rs : null,
+      effectiveSalmonRestoreStep:
+        themeId === 'salmonDaysRadio' ? salmonRestoreStep : null,
+      activeRestoreEnv,
+      swampLayerGates:
+        themeId === 'swamp' ? swampLayerGates : null,
+      salmonLayerGates:
+        themeId === 'salmonDaysRadio' ? salmonLayerGates : null,
+      typography: {
+        mountFloatingLetters,
+        AQ_SKIP_TYPOGRAPHY,
+        floatingLettersEnabled,
+        gateTypography_swamp:
+          themeId === 'swamp' ? swampGates.typography : null,
+        gateTypography_salmon_ge2:
+          themeId !== 'salmonDaysRadio' ? null : salmonRestoreStep >= 2,
+        mountLettersEffective,
+        typographyFinalStatus,
+      },
+      orb: {
+        radioInTypography_embeddedPath: radioInTypography,
+        standaloneAmbientRadio_shows: standaloneAmbientRadioShows,
+        resolvedPath: radioInTypography
+          ? 'embedded_in_typography'
+          : standaloneAmbientRadioShows
+            ? 'standalone_AmbientRadio'
+            : 'off',
+        ambientRadioEnabled,
+        radioSlotIndex,
+      },
+    });
   }, [
-    theme.letters.text,
-    theme.letters.radioSlot,
-    ambientRadioEnabled,
+    themeId,
+    swampGates,
+    salmonRestoreStep,
+    salmonEnv,
+    mountLettersEffective,
+    mountFloatingLetters,
     floatingLettersEnabled,
+    radioInTypography,
+    standaloneAmbientRadioShows,
+    ambientRadioEnabled,
+    radioSlotIndex,
   ]);
 
   const initialTypographyCameraZ = useMemo(() => {
@@ -612,14 +1072,211 @@ export default function Scene() {
     size.height,
   ]);
 
-  const cameraStartZ = THREE.MathUtils.clamp(
-    floatingLettersEnabled ? initialTypographyCameraZ : 4.5,
-    cameraZMin + 0.5,
-    cameraZMax,
+  const [cameraZMinLive, cameraZMaxLive] = useMemo(
+    () => guardCameraRails(cameraZMin, cameraZMax),
+    [cameraZMin, cameraZMax],
   );
+
+  const cameraStartZRaw = THREE.MathUtils.clamp(
+    mountLettersEffective ? initialTypographyCameraZ : 4.5,
+    cameraZMinLive + 0.5,
+    cameraZMaxLive,
+  );
+  const cameraStartZ = Number.isFinite(cameraStartZRaw)
+    ? cameraStartZRaw
+    : THREE.MathUtils.clamp(
+        8.5,
+        cameraZMinLive + 0.5,
+        cameraZMaxLive,
+      );
+
+  const [volumeFogNear, volumeFogFar] = useMemo(
+    () =>
+      guardVolumeFog(
+        fogNear,
+        fogFar,
+        theme.water.fogNear,
+        theme.water.fogFar,
+      ),
+    [fogNear, fogFar, theme.water.fogNear, theme.water.fogFar],
+  );
+
+  /**
+   * Salmon incremental rebuild: optional clouds + midfield (`salmonEnv.densityCloudsMidfield`).
+   * Shadow-fish silhouettes mount separately (see below).
+   */
+  const densitySurroundOn =
+    densityLayerEnabled &&
+    (themeId !== 'salmonDaysRadio' || salmonEnv.densityCloudsMidfield) &&
+    (themeId !== 'swamp' || swampGates.density);
+
+  const safeWaterHazeOpacity = THREE.MathUtils.clamp(
+    Number(waterHazeOpacity) || theme.water.waterHazeOpacity,
+    0,
+    0.55,
+  );
+  /** Stabilization: cap stacked camera haze planes (additive drift can white-out). */
+  const stabilityHazeLayerCount = Math.max(
+    0,
+    Math.min(guardHazeLayerCount(hazeLayerCount, 'Scene.hazeLayerCount'), 5),
+  );
+  const stabilityHazeOpacity = THREE.MathUtils.clamp(
+    safeWaterHazeOpacity * 0.72,
+    0,
+    0.38,
+  );
+
+  const recoveryLite = AQ_LITE_ATMOSPHERE;
+  const displayHazeLayerCount = recoveryLite
+    ? Math.min(1, stabilityHazeLayerCount)
+    : stabilityHazeLayerCount;
+  const displayHazeOpacity = recoveryLite
+    ? Math.min(0.1, stabilityHazeOpacity)
+    : stabilityHazeOpacity;
+
+  useEffect(() => {
+    if (themeId !== 'salmonDaysRadio' || salmonRestoreStep >= SALMON_RESTORE_FULL) {
+      return;
+    }
+    const salmonHazeMounted = !!salmonEnv.waterHaze;
+    logRecoveryLayer('salmonDaysRadio', 'environment-visibility', {
+      vault: salmonEnv.vault,
+      backdrop: salmonEnv.backdrop,
+      waterHazeFlag: salmonEnv.waterHaze,
+      waterHazeMounted: salmonHazeMounted,
+      displayHazeLayerCount,
+      displayHazeOpacity,
+      salmonHazeOpacityCap: Math.min(0.09, displayHazeOpacity * 0.5),
+      fogColorLeva: fogColor,
+      fogNear: volumeFogNear,
+      fogFar: volumeFogFar,
+      note:
+        salmonHazeMounted && displayHazeOpacity < 0.02
+          ? 'haze opacity near zero — may be invisible'
+          : null,
+    });
+  }, [
+    themeId,
+    salmonRestoreStep,
+    salmonEnv,
+    displayHazeLayerCount,
+    displayHazeOpacity,
+    fogColor,
+    volumeFogNear,
+    volumeFogFar,
+  ]);
 
   const atm = theme.atmosphere;
 
+  const cameraNavBoundsMin = useMemo(() => {
+    const x = Number(atm?.navigation?.boundsXMin ?? -14);
+    const y = Number(atm?.navigation?.boundsYMin ?? -7);
+    const z = cameraZMinLive;
+    return [
+      Number.isFinite(x) ? x : -14,
+      Number.isFinite(y) ? y : -7,
+      Number.isFinite(z) ? z : -28,
+    ];
+  }, [atm?.navigation?.boundsXMin, atm?.navigation?.boundsYMin, cameraZMinLive]);
+
+  const cameraNavBoundsMax = useMemo(() => {
+    const x = Number(atm?.navigation?.boundsXMax ?? 14);
+    const y = Number(atm?.navigation?.boundsYMax ?? 8);
+    const z = cameraZMaxLive;
+    return [
+      Number.isFinite(x) ? x : 14,
+      Number.isFinite(y) ? y : 8,
+      Number.isFinite(z) ? z : 58,
+    ];
+  }, [atm?.navigation?.boundsXMax, atm?.navigation?.boundsYMax, cameraZMaxLive]);
+
+  // Leva/localStorage can restore numeric sliders outside current min/max or
+  // as corrupted strings — zero drag sensitivity reads as a "frozen" camera.
+  const safeDragSensitivity = THREE.MathUtils.clamp(
+    Number(dragSensitivity) || 1,
+    0.12,
+    3,
+  );
+  const safeScrollDepthStrength = Math.max(
+    0.15,
+    THREE.MathUtils.clamp(Number(scrollDepthStrength) || 1, 0, 3),
+  );
+  const safeHoverParallaxStrength = THREE.MathUtils.clamp(
+    Number(hoverParallaxStrength) || 1,
+    0,
+    3,
+  );
+  const safeIdleSway = THREE.MathUtils.clamp(Number(idleSway) || 1, 0, 3);
+  const safeInertiaStrength = THREE.MathUtils.clamp(
+    Number(inertiaStrength) || 1,
+    0,
+    3,
+  );
+  const safeHeroFishCount = useMemo(
+    () => guardHeroFishCount(heroFishCount, 'Scene.heroFishCount'),
+    [heroFishCount],
+  );
+  const safeClusterCount = useMemo(
+    () => guardClusterCount(clusters, 'Scene.clusters'),
+    [clusters],
+  );
+  const safeSchoolSpread = useMemo(
+    () => guardSchoolSpread(schoolSpread, 'Scene.schoolSpread'),
+    [schoolSpread],
+  );
+  const safeSwimSpeed = useMemo(
+    () => guardSwimSpeed(swimSpeed, 'Scene.swimSpeed'),
+    [swimSpeed],
+  );
+  const safeDragDamping = THREE.MathUtils.clamp(
+    Number(dragDamping) || 0.7,
+    0.05,
+    0.999,
+  );
+  const safeMaxPitchDegrees = THREE.MathUtils.clamp(
+    Number(maxPitchDegrees) || 70,
+    10,
+    89,
+  );
+  const safePositionSmoothing = THREE.MathUtils.clamp(0.095, 0.04, 1);
+  const safeParticleDepthDensity = Math.max(
+    0.22,
+    Number(particleDepthDensity) || 1,
+  );
+
+  /** After a theme patch, skip one passive fog sync — Leva props can lag one commit. */
+  const skipLevaFogSyncRef = useRef(false);
+
+  const levaSanitizeSnapshot = useRef({});
+  levaSanitizeSnapshot.current = {
+    dragSensitivity,
+    scrollDepthStrength,
+    heroFishCount,
+    swimSpeed,
+    cameraZMin,
+    cameraZMax,
+    dragDamping,
+    inertiaStrength,
+    maxPitchDegrees,
+    clusters,
+    schoolSpread,
+    floatingLettersEnabled,
+  };
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      const patch = buildLevaSanitizePatch(levaSanitizeSnapshot.current);
+      if (Object.keys(patch).length) setLeva(patch);
+    }, 160);
+    return () => clearTimeout(t);
+  }, [setLeva]);
+
+  useEffect(() => {
+    if (AQ_DEBUG) console.info('[aquarium] Scene mounted');
+  }, []);
+
+  const atmBackgroundField = atm?.backgroundField ?? {};
+  const backgroundFieldPalette = atmBackgroundField.palette ?? 'default';
   const backgroundFieldProps = {
     displacementStrength,
     noiseScale,
@@ -628,14 +1285,19 @@ export default function Scene() {
     pinkAccentStrength,
     diagonalFlowStrength,
     backgroundOpacity,
-    fogColor,
     fogNear,
     fogFar,
     position: [0, 0, -28],
     size: [110, 60],
     segments: [220, 130],
     palette: 'default',
-    ...(atm?.backgroundField ?? {}),
+    ...atmBackgroundField,
+    // Open-ocean uses wide manual fog in the shader; colour must track the
+    // active theme, not a stale Leva value from the previous mode.
+    fogColor:
+      backgroundFieldPalette === 'openOcean'
+        ? (atmBackgroundField.fogColor ?? theme.water.fogColor)
+        : (atmBackgroundField.fogColor ?? fogColor),
   };
 
   const surfacePlaneProps = {
@@ -648,8 +1310,8 @@ export default function Scene() {
     diagonalFlow: surfaceDiagonalFlow,
     fogBlend: surfaceFogBlend,
     fogColor,
-    fogNear,
-    fogFar,
+    fogNear: volumeFogNear,
+    fogFar: volumeFogFar,
     planeSize: 80,
     baseColor: '#5a90a8',
     highlightColor: '#a8d7e6',
@@ -665,8 +1327,8 @@ export default function Scene() {
     goldIntensity: seabedGoldIntensity,
     fogBlend: 1,
     fogColor,
-    fogNear,
-    fogFar,
+    fogNear: volumeFogNear,
+    fogFar: volumeFogFar,
     planeSize: 96,
     sandColor: '#d8c8a4',
     highlightColor: '#f4ecd6',
@@ -676,69 +1338,73 @@ export default function Scene() {
 
   const dustAtm = atm?.dustParticles ?? {};
   const waterHazeAtm = atm?.waterHaze ?? {};
-  const salmonOceanVaultAtm = atm?.salmonOceanVault;
+  const salmonVaultMerged = useMemo(() => {
+    if (themeId !== 'salmonDaysRadio') return null;
+    return {
+      ...(atm?.salmonOceanVault ?? {}),
+      ...(atm?.salmonRebuildVault ?? {}),
+    };
+  }, [themeId, atm]);
 
-  // Force the live Leva store to match the active theme whenever
-  // `themeId` changes. The Leva store survives without a Scene
-  // remount; schema defaults only apply on first mount, so this
-  // effect reapplies waters+beam+moss for each mode.
+  // --- Theme atmosphere sync ------------------------------------------------
+  //
+  // `setLeva` must NOT run inside `useLayoutEffect`. Updating the Leva zustand
+  // store during the layout commit (especially from a click-driven theme
+  // change) can freeze the tree / block input -- Salmon Days looked black +
+  // unresponsive while Swamp kept working.
+  //
+  // Pattern: layout applies Three.js fog/background from `getTheme(themeId)`
+  // only (cheap, synchronous GL state). Leva patch runs in a passive effect.
+  useLayoutEffect(() => {
+    const t = getTheme(themeId);
+    const [tNear, tFar] = guardVolumeFog(
+      t.water.fogNear,
+      t.water.fogFar,
+      t.water.fogNear,
+      t.water.fogFar,
+    );
+    scene.background = new THREE.Color(t.water.backgroundColor);
+    if (!scene.fog) {
+      scene.fog = new THREE.Fog(t.water.fogColor, tNear, tFar);
+    } else {
+      scene.fog.color.set(t.water.fogColor);
+      scene.fog.near = tNear;
+      scene.fog.far = tFar;
+    }
+    skipLevaFogSyncRef.current = true;
+  }, [themeId, scene]);
+
   useEffect(() => {
+    const t = getTheme(themeId);
     const patch = {
-      fogColor: theme.water.fogColor,
-      fogNear: theme.water.fogNear,
-      fogFar: theme.water.fogFar,
-      waterHazeOpacity: theme.water.waterHazeOpacity,
-      hazeLayerCount: theme.water.hazeLayerCount,
-      kelpMossRatio: theme.kelp.mossRatio,
-      ...theme.kelp.levaAnchors,
-      beamPositionX: theme.beam.position[0],
-      beamPositionY: theme.beam.position[1],
-      beamPositionZ: theme.beam.position[2],
-      beamAngle: theme.beam.angleDegrees,
-      beamWidth: theme.beam.width,
-      beamLength: theme.beam.length,
-      beamIntensity: theme.beam.intensity,
-      beamOpacity: theme.beam.opacity,
-      beamSoftness: theme.beam.softness,
-      beamFalloff: theme.beam.falloff,
-      beamDiffusion: theme.beam.diffusion,
-      beamCausticStrength: theme.beam.causticStrength,
-      beamNoiseScale: theme.beam.noiseScale,
-      beamRegionSize: theme.beam.regionSize,
-      beamShimmerSpeed: theme.beam.shimmerSpeed,
-      beamColorWarmth: theme.beam.colorWarmth,
-      ...theme.atmosphere?.levaAnchors,
+      fogColor: t.water.fogColor,
+      fogNear: t.water.fogNear,
+      fogFar: t.water.fogFar,
+      waterHazeOpacity: t.water.waterHazeOpacity,
+      hazeLayerCount: t.water.hazeLayerCount,
+      kelpMossRatio: t.kelp.mossRatio,
+      ...t.kelp.levaAnchors,
+      beamPositionX: t.beam.position[0],
+      beamPositionY: t.beam.position[1],
+      beamPositionZ: t.beam.position[2],
+      beamAngle: t.beam.angleDegrees,
+      beamWidth: t.beam.width,
+      beamLength: t.beam.length,
+      beamIntensity: t.beam.intensity,
+      beamOpacity: t.beam.opacity,
+      beamSoftness: t.beam.softness,
+      beamFalloff: t.beam.falloff,
+      beamDiffusion: t.beam.diffusion,
+      beamCausticStrength: t.beam.causticStrength,
+      beamNoiseScale: t.beam.noiseScale,
+      beamRegionSize: t.beam.regionSize,
+      beamShimmerSpeed: t.beam.shimmerSpeed,
+      beamColorWarmth: t.beam.colorWarmth,
+      ...t.atmosphere?.levaAnchors,
+      ...(themeId === 'salmonDaysRadio' ? { kelpEnabled: false } : {}),
     };
     setLeva(patch);
-    // setLeva is stable across renders; deps cover every theme
-    // field we forward into Leva so a config change in themes.js
-    // also re-applies if it happens at runtime.
-  }, [
-    themeId,
-    setLeva,
-    theme.water.fogColor,
-    theme.water.fogNear,
-    theme.water.fogFar,
-    theme.water.waterHazeOpacity,
-    theme.water.hazeLayerCount,
-    theme.kelp.mossRatio,
-    theme.kelp.levaAnchors,
-    theme.atmosphere?.levaAnchors,
-    theme.beam.position,
-    theme.beam.angleDegrees,
-    theme.beam.width,
-    theme.beam.length,
-    theme.beam.intensity,
-    theme.beam.opacity,
-    theme.beam.softness,
-    theme.beam.falloff,
-    theme.beam.diffusion,
-    theme.beam.causticStrength,
-    theme.beam.noiseScale,
-    theme.beam.regionSize,
-    theme.beam.shimmerSpeed,
-    theme.beam.colorWarmth,
-  ]);
+  }, [themeId, setLeva]);
 
   // Push live Leva values into the radio audio graph. Memoised refs
   // inside RadioContext absorb these without re-creating the graph,
@@ -754,35 +1420,24 @@ export default function Scene() {
     radio.setFilterStrength(underwaterAudioFilterStrength);
   }, [radio, underwaterAudioFilterStrength]);
 
-  // Background colour + initial fog. Both follow the active theme so
-  // toggling modes recolours the void behind the haze in lockstep
-  // with the new fog/haze defaults pushed into Leva above. The fog
-  // object itself is created once per theme; the next effect below
-  // keeps its parameters in sync with the live Leva sliders.
+  // Background + volume fog: Leva sliders after the theme is stable.
+  // Theme switches set Three fog in `useLayoutEffect` and raise
+  // `skipLevaFogSyncRef` so this effect does not re-apply a *stale* fog color
+  // from the previous mode (that produced black frames and stuck atmosphere).
   useEffect(() => {
+    if (skipLevaFogSyncRef.current) {
+      skipLevaFogSyncRef.current = false;
+      return;
+    }
     scene.background = new THREE.Color(theme.water.backgroundColor);
-    scene.fog = new THREE.Fog(
-      theme.water.fogColor,
-      theme.water.fogNear,
-      theme.water.fogFar,
-    );
-    return () => {
-      scene.fog = null;
-    };
-  }, [
-    scene,
-    theme.water.backgroundColor,
-    theme.water.fogColor,
-    theme.water.fogNear,
-    theme.water.fogFar,
-  ]);
-
-  useEffect(() => {
-    if (!scene.fog) return;
-    scene.fog.color.set(fogColor);
-    scene.fog.near = fogNear;
-    scene.fog.far = Math.max(fogFar, fogNear + 1);
-  }, [fogColor, fogNear, fogFar, scene]);
+    if (!scene.fog) {
+      scene.fog = new THREE.Fog(fogColor, volumeFogNear, volumeFogFar);
+    } else {
+      scene.fog.color.set(fogColor);
+      scene.fog.near = volumeFogNear;
+      scene.fog.far = volumeFogFar;
+    }
+  }, [scene, theme.water.backgroundColor, fogColor, volumeFogNear, volumeFogFar]);
 
   const lights = useMemo(() => {
     const swamp = themeId === 'swamp';
@@ -790,24 +1445,24 @@ export default function Scene() {
     return (
       <>
         <ambientLight
-          intensity={swamp ? 0.46 : salmon ? 0.52 : 0.35}
-          color={swamp ? '#6490a8' : salmon ? '#c4d7f0' : '#5b7f9c'}
+          intensity={swamp ? 0.46 : salmon ? 0.38 : 0.35}
+          color={swamp ? '#6490a8' : salmon ? '#90a8c8' : '#5b7f9c'}
         />
         <hemisphereLight
           color={swamp ? '#b8d4e8' : salmon ? '#eef4ff' : '#9fc5e0'}
-          groundColor={swamp ? '#051015' : salmon ? '#081a2c' : '#020a12'}
-          intensity={swamp ? 0.52 : salmon ? 0.58 : 0.45}
+          groundColor={swamp ? '#051015' : salmon ? '#020610' : '#020a12'}
+          intensity={swamp ? 0.52 : salmon ? 0.56 : 0.45}
         />
         <directionalLight
-          position={[3, 8, 4]}
-          intensity={swamp ? 0.72 : salmon ? 0.68 : 0.6}
-          color={swamp ? '#d2e8f8' : salmon ? '#fff3e0' : '#bcdcef'}
+          position={salmon ? [3, 14, 5] : [3, 8, 4]}
+          intensity={swamp ? 0.72 : salmon ? 0.58 : 0.6}
+          color={swamp ? '#d2e8f8' : salmon ? '#fff2e0' : '#bcdcef'}
         />
         <pointLight
           position={[-6, -2, -4]}
           intensity={swamp ? 0.48 : salmon ? 0.36 : 0.4}
-          color={swamp ? '#5588a0' : salmon ? '#7a9cc8' : '#3f6f8a'}
-          distance={swamp ? 22 : salmon ? 38 : 22}
+          color={swamp ? '#5588a0' : salmon ? '#8caad8' : '#3f6f8a'}
+          distance={swamp ? 22 : salmon ? 48 : 22}
           decay={2}
         />
       </>
@@ -816,53 +1471,94 @@ export default function Scene() {
 
   return (
     <>
+      <AquariumEngineDebug enabled={AQ_DEBUG} />
       {lights}
       <CameraRig
         // Z is chosen so the full themed letter string fits in the
         // viewport width at the current aspect + FOV (see
-        // `typographyFramingCameraZ`). Scroll wheel still pushes
-        // deeper into the school or pulls back within Leva clamps.
+        // `typographyFramingCameraZ`). Scroll / trackpad adds buoyant
+        // drift along the current look direction inside the themed nav
+        // volume (XY from `theme.atmosphere.navigation`, Z from Leva).
+        anchorResetKey={themeId}
         basePosition={[0, 0, cameraStartZ]}
+        boundsMin={cameraNavBoundsMin}
+        boundsMax={cameraNavBoundsMax}
         hoverParallax={{ x: 0.6, y: 0.4 }}
-        hoverParallaxStrength={hoverParallaxStrength}
-        scrollDepthStrength={scrollDepthStrength}
-        cameraZMin={cameraZMin}
-        cameraZMax={cameraZMax}
-        idleSway={idleSway}
-        dragSensitivity={dragSensitivity}
-        dragDamping={dragDamping}
-        inertiaStrength={inertiaStrength}
-        maxPitchDegrees={maxPitchDegrees}
+        hoverParallaxStrength={safeHoverParallaxStrength}
+        scrollDepthStrength={safeScrollDepthStrength}
+        idleSway={safeIdleSway}
+        dragSensitivity={safeDragSensitivity}
+        dragDamping={safeDragDamping}
+        inertiaStrength={safeInertiaStrength}
+        maxPitchDegrees={safeMaxPitchDegrees}
+        positionSmoothing={safePositionSmoothing}
+        verticalComfort={atm?.cameraComfort}
       />
-      {themeId === 'salmonDaysRadio' && (
-        <SalmonOceanVault
-          deepColor={salmonOceanVaultAtm?.deepColor ?? '#020408'}
-          midColor={salmonOceanVaultAtm?.midColor ?? '#102544'}
-          surfaceTint={salmonOceanVaultAtm?.surfaceTint ?? '#fff6fc'}
-          shimmer={salmonOceanVaultAtm?.shimmer ?? 1.2}
-        />
+      {themeId === 'salmonDaysRadio' && salmonEnv.vault && salmonVaultMerged && (
+        <ErrorBoundary name="SalmonOceanVault" fallback={null}>
+          <SalmonOceanVault
+            deepColor={salmonVaultMerged.deepColor ?? '#020408'}
+            midColor={salmonVaultMerged.midColor ?? '#102544'}
+            surfaceTint={salmonVaultMerged.surfaceTint ?? '#fff6fc'}
+            warmPeach={salmonVaultMerged.warmPeach ?? '#ffd8bc'}
+            aquaSheen={salmonVaultMerged.aquaSheen ?? '#c8f0ff'}
+            shimmer={salmonVaultMerged.shimmer ?? 1.2}
+            vaultCaustic={salmonVaultMerged.vaultCaustic ?? 1}
+            overheadGlow={salmonVaultMerged.overheadGlow ?? 1}
+          />
+        </ErrorBoundary>
       )}
-      <BackgroundField {...backgroundFieldProps} />
-      <WaterHaze
-        layerCount={hazeLayerCount}
-        opacity={waterHazeOpacity}
-        speed={hazeMovementSpeed}
-        color={fogColor}
-        causticColor={waterHazeAtm?.causticColor ?? '#7fb8c8'}
-        abyssVertFade={
-          themeId === 'salmonDaysRadio'
-            ? (waterHazeAtm?.abyssVertFade ?? 0.92)
-            : 0
-        }
-        hazeProfile={
-          themeId === 'salmonDaysRadio'
-            ? 'salmon'
-            : themeId === 'swamp'
-              ? 'swamp'
-              : 'default'
-        }
-      />
-      {surfaceEnabled && themeId !== 'salmonDaysRadio' && (
+      {themeId === 'salmonDaysRadio' && salmonEnv.canopy && (
+        <SalmonOceanCanopy fogColor={fogColor} {...(atm?.oceanSurfaceCanopy ?? {})} />
+      )}
+      {themeId !== 'salmonDaysRadio' && (
+        <>
+          {swampGates.background && (
+            <ErrorBoundary name="SwampBackgroundField" fallback={null}>
+              <BackgroundField {...backgroundFieldProps} />
+            </ErrorBoundary>
+          )}
+          {swampGates.waterHaze && (
+            <ErrorBoundary name="SwampWaterHaze" fallback={null}>
+              <WaterHaze
+                layerCount={displayHazeLayerCount}
+                opacity={displayHazeOpacity}
+                speed={hazeMovementSpeed}
+                color={fogColor}
+                causticColor={waterHazeAtm?.causticColor ?? '#7fb8c8'}
+                abyssVertFade={0}
+                hazeProfile={themeId === 'swamp' ? 'swamp' : 'default'}
+                luminousOcean={0}
+              />
+            </ErrorBoundary>
+          )}
+        </>
+      )}
+      {themeId === 'salmonDaysRadio' && salmonEnv.backdrop && (
+        <ErrorBoundary name="SalmonBackgroundField" fallback={null}>
+          <BackgroundField
+            {...backgroundFieldProps}
+            {...(atm?.salmonRebuildBackdrop ?? {})}
+          />
+        </ErrorBoundary>
+      )}
+      {themeId === 'salmonDaysRadio' && salmonEnv.waterHaze && (
+        <ErrorBoundary fallback={null}>
+          <WaterHaze
+            layerCount={Math.min(2, displayHazeLayerCount)}
+            opacity={Math.min(0.09, displayHazeOpacity * 0.5)}
+            speed={hazeMovementSpeed}
+            color={fogColor}
+            causticColor={waterHazeAtm?.causticColor ?? '#7fb8c8'}
+            abyssVertFade={waterHazeAtm?.abyssVertFade ?? 0.92}
+            hazeProfile="salmon"
+            luminousOcean={0}
+          />
+        </ErrorBoundary>
+      )}
+      {surfaceEnabled &&
+        themeId !== 'salmonDaysRadio' &&
+        swampGates.surface && (
         <SurfacePlane {...surfacePlaneProps} />
       )}
       {/*
@@ -871,16 +1567,16 @@ export default function Scene() {
         depthWrite disabled, but a consistent mount order keeps
         the visual stack stable.
       */}
-      {seabedEnabled && themeId !== 'salmonDaysRadio' && (
+      {seabedEnabled &&
+        themeId !== 'salmonDaysRadio' &&
+        swampGates.seabed && (
         <Seabed {...seabedProps} />
       )}
       {/*
-        Kelp forest. Strands root at the seabed Y so flipping the
-        seabed depth slider also raises/lowers the kelp anchor.
-        When the seabed itself is disabled the kelp still uses the
-        same Y as the implicit floor reference.
+        Kelp forest (Swamp Molly only). Salmon Days Radio omits kelp so open
+        water stays clean — ribbon columns were reading as vertical line layers.
       */}
-      {kelpEnabled && (
+      {kelpEnabled && themeId !== 'salmonDaysRadio' && swampGates.kelp && (
         <KelpForest
           count={kelpDensity}
           distanceBias={kelpDistanceBias}
@@ -893,31 +1589,44 @@ export default function Scene() {
             -(seabedProps.depth + (theme.kelp.seabedAnchorExtra ?? 0))
           }
           fogColor={fogColor}
-          fogNear={fogNear}
-          fogFar={fogFar}
-          // Theme-driven fraction of strands rendered as broad moss
-          // growths. Swamp mode pushes ~0.35; Salmon Days Radio 0.
+          fogNear={volumeFogNear}
+          fogFar={volumeFogFar}
           mossRatio={kelpMossRatio}
           trailerRatio={theme.kelp.trailerRatio ?? 0}
           mossHeightMul={theme.kelp.mossHeightMul ?? 1}
           mossThicknessMul={theme.kelp.mossThicknessMul ?? 1}
           ribbonHeightMul={theme.kelp.ribbonHeightMul ?? 1}
           ribbonThicknessMul={theme.kelp.ribbonThicknessMul ?? 1}
-          visualMode={themeId === 'salmonDaysRadio' ? 'openOcean' : 'default'}
           abyssBlend={theme.kelp.abyssBlend ?? 0}
           verticalDream={theme.kelp.verticalDream ?? 0.12}
           dreamVerticalSpeed={theme.kelp.dreamVerticalSpeed ?? 0.18}
         />
       )}
-      {themeId === 'swamp' && (
-        <SwampSunkenCar
-          seabedY={-seabedProps.depth}
-          fogNear={fogNear}
-          fogFar={fogFar}
-          fogColor={fogColor}
-        />
+      {themeId === 'swamp' && !AQ_SCENE_MINIMAL && swampGates.car1 && (
+        <ErrorBoundary fallback={null}>
+          <SwampSunkenCar
+            headlightsEnabled={swampGates.car1Headlights}
+            seabedY={-seabedProps.depth}
+            fogNear={volumeFogNear}
+            fogFar={volumeFogFar}
+            fogColor={fogColor}
+          />
+        </ErrorBoundary>
       )}
-      {lightBeamEnabled && themeId !== 'salmonDaysRadio' && (
+      {themeId === 'swamp' && !AQ_SCENE_MINIMAL && swampGates.car2 && (
+        <ErrorBoundary fallback={null}>
+          <SwampSunkenFiatPanda
+            seabedY={-seabedProps.depth}
+            fogNear={volumeFogNear}
+            fogFar={volumeFogFar}
+            fogColor={fogColor}
+          />
+        </ErrorBoundary>
+      )}
+      {lightBeamEnabled &&
+        !recoveryLite &&
+        ((themeId === 'salmonDaysRadio' && salmonRestoreStep >= 8) ||
+          (themeId === 'swamp' && swampGates.lightBeam)) && (
         <LightBeam
           style={theme.beam.style}
           secondLayer={theme.beam.secondLayer}
@@ -949,8 +1658,8 @@ export default function Scene() {
           swampFogFMul={theme.beam.swampFogFMul ?? 1}
           swampFogFloor={theme.beam.swampFogFloor ?? 0}
           swampDiscardMin={theme.beam.swampDiscardMin ?? 0.00035}
-          fogNear={fogNear}
-          fogFar={fogFar}
+          fogNear={volumeFogNear}
+          fogFar={volumeFogFar}
         />
       )}
       {/*
@@ -974,9 +1683,35 @@ export default function Scene() {
         movement / shimmer / scatter / bubbles / clustering behaves
         identically regardless of which fallback rung is rendered.
       */}
+      {themeId === 'salmonDaysRadio' &&
+        salmonEnv.satelliteSchools &&
+        useNewSalmonSkins && (
+        <ErrorBoundary fallback={null}>
+          <Suspense fallback={null}>
+            <SalmonSatelliteSchools
+              swimSpeed={safeSwimSpeed}
+              schoolSpread={safeSchoolSpread}
+              shimmerIntensity={shimmerIntensity}
+              avoidanceRadius={cameraAvoidanceRadius}
+              scatterEnabled={scatterEnabled}
+              randomScatterFrequency={randomScatterFrequency}
+              scatterRadius={scatterRadius}
+              scatterStrength={scatterStrength}
+              scatterDuration={scatterDuration}
+              scatterRecoverySpeed={scatterRecoverySpeed}
+              chainReactionChance={chainReactionChance}
+              bubbleSpawnRate={bubbleSpawnRate}
+              bubbleLifetime={bubbleLifetime}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
       {(() => {
         const heroLightBeam = {
-          enabled: lightBeamEnabled && themeId !== 'salmonDaysRadio',
+          enabled:
+            lightBeamEnabled &&
+            ((themeId === 'salmonDaysRadio' && salmonRestoreStep >= 8) ||
+              (themeId === 'swamp' && swampGates.lightBeam)),
           position: [beamPositionX, beamPositionY, beamPositionZ],
           angleDegrees: beamAngle,
           width: beamWidth,
@@ -987,16 +1722,15 @@ export default function Scene() {
           behindBoost: theme.beam.fishBoostBehind,
         };
         const schoolProps = {
-          count: heroFishCount,
-          clusterCount: clusters,
+          count: safeHeroFishCount,
+          clusterCount: safeClusterCount,
           seed: 1337,
           bounds: VOLUME,
-          spread: schoolSpread,
-          swimSpeed,
+          spread: safeSchoolSpread,
+          swimSpeed: safeSwimSpeed,
           shimmerIntensity,
           foregroundCrossingChance,
           avoidanceRadius: cameraAvoidanceRadius,
-          fishDistanceOpacityStrength,
           scatterEnabled,
           randomScatterFrequency,
           scatterRadius,
@@ -1009,6 +1743,8 @@ export default function Scene() {
           bubbleLifetime,
           maxBubbles,
           lightBeam: heroLightBeam,
+          clusterAnchorY: theme.fish.schoolClusterYOffset ?? 0,
+          heroDepthCue: atm?.heroFishAtmosphere ?? null,
         };
         // Rider-specific props apply to whichever school renders.
         // We gate enableRider on whether the active theme actually
@@ -1023,18 +1759,11 @@ export default function Scene() {
           riderCanScatter: riderSalmonCanScatter,
         };
         return (
-          <ErrorBoundary
-            fallback={<FishSchool {...schoolProps} {...riderProps} />}
-          >
-            <Suspense fallback={null}>
+          <ErrorBoundary fallback={<EmergencyFishSchool />}>
+            <Suspense fallback={<EmergencyFishSchool />}>
               {useNewSalmonSkins ? (
-                <ErrorBoundary
-                  fallback={
-                    <Suspense fallback={null}>
-                      <SalmonSvgFallback {...schoolProps} {...riderProps} />
-                    </Suspense>
-                  }
-                >
+                <ErrorBoundary fallback={<EmergencyFishSchool />}>
+                  <Suspense fallback={<EmergencyFishSchool />}>
                   <WebpFishSchool
                     key={themeId}
                     mainUrl={theme.fish.mainTexture}
@@ -1043,6 +1772,7 @@ export default function Scene() {
                     {...schoolProps}
                     {...riderProps}
                   />
+                </Suspense>
                 </ErrorBoundary>
               ) : (
                 <SalmonSvgFallback {...schoolProps} {...riderProps} />
@@ -1051,7 +1781,21 @@ export default function Scene() {
           </ErrorBoundary>
         );
       })()}
-      {densityLayerEnabled && (
+      {!AQ_SCENE_MINIMAL &&
+        (themeId !== 'salmonDaysRadio' || salmonRestoreStep >= 10) &&
+        (themeId !== 'swamp' || swampGates.companions) && (
+        <ErrorBoundary fallback={null}>
+          <AmbientCompanionSchools
+            theme={theme}
+            themeId={themeId}
+            swimSpeed={safeSwimSpeed}
+            shimmerIntensity={shimmerIntensity}
+            useNewSalmonSkins={useNewSalmonSkins}
+            heroDepthCue={atm?.heroFishAtmosphere ?? null}
+          />
+        </ErrorBoundary>
+      )}
+      {densitySurroundOn && (
         <>
           {/*
             Distant point-sprite swarms first, so they render under
@@ -1062,16 +1806,16 @@ export default function Scene() {
             `atmosphericDensity` is a master count multiplier across
             both the midfield and bg layers, so the user can fade the
             whole surround system up/down with a single slider.
-            `heroFishDominance` further softens the distant opacities
-            so the hero school never has to fight for attention.
+            `heroFishDominance` deepens distant atmospheric silhouettes
+            (colour / contrast), not transparency.
           */}
           <BackgroundFishClouds
             density={backgroundCloudDensity * atmosphericDensity}
             speed={backgroundSwarmSpeed * backgroundMotionStrength}
-            opacity={
-              Math.max(0.04, distantFishOpacity * 0.5) /
-              Math.max(0.5, heroFishDominance)
-            }
+            opacity={Math.max(
+              0.24,
+              Math.min(0.98, 0.22 + distantFishOpacity * 0.95),
+            )}
             peripheralDensity={peripheralDensity}
           />
           {/*
@@ -1087,58 +1831,60 @@ export default function Scene() {
               count={Math.round(midfieldFishCount * atmosphericDensity)}
               worldRadius={worldRadius}
               verticalSpread={verticalSpread}
-              swimSpeed={swimSpeed * 0.25 * backgroundMotionStrength}
-              distantFishOpacity={
-                distantFishOpacity / Math.max(0.5, heroFishDominance)
-              }
+              swimSpeed={safeSwimSpeed * 0.25 * backgroundMotionStrength}
+              distantFishOpacity={distantFishOpacity}
+              atmosphereCrush={heroFishDominance}
               peripheralDensity={peripheralDensity}
-              heroFishDominance={heroFishDominance}
               fogColor={fogColor}
-              fogNear={fogNear}
-              fogFar={fogFar}
+              fogNear={volumeFogNear}
+              fogFar={volumeFogFar}
             />
           </Suspense>
         </>
       )}
-      {floatingLettersEnabled && (
-        <FloatingLetters
-          text={theme.letters.text}
-          depthSpread={letterDepthSpread}
-          floatStrength={letterFloatStrength}
-          shimmerStrength={letterShimmerStrength}
-          opacity={letterOpacity}
-          scale={letterScale}
-          spacing={
-            letterSpacing * (theme.letters.letterSpacingMul ?? 1)
-          }
-          murkiness={Math.min(
-            1,
-            letterMurkiness +
-              (theme.letters.letterMurkinessBoost ?? 0),
-          )}
-          rowGapMul={theme.letters.rowGapMul ?? 1}
-          intraLineYJitterMul={
-            theme.letters.intraLineYJitterMul ?? 1
-          }
-          interRowJitterMul={theme.letters.interRowJitterMul ?? 0}
-          lineXJitterMul={theme.letters.lineXJitterMul ?? 1}
-          beam={{
-            enabled: lightBeamEnabled && themeId !== 'salmonDaysRadio',
-            position: [beamPositionX, beamPositionY, beamPositionZ],
-            angleDegrees: beamAngle,
-            width: beamWidth,
-            length: beamLength,
-            regionSize: beamRegionSize,
-          }}
-          radioSlot={theme.letters.radioSlot}
-          radioEmbedded={radioInTypography}
-          radioGlowIntensity={radioGlowIntensity}
-          beaconAtmosphere={theme.radio?.beaconAtmosphere}
-          typographyReadability={theme.letters.typographyReadability}
-        />
+      {themeId === 'salmonDaysRadio' &&
+        !AQ_SCENE_MINIMAL &&
+        salmonEnv.distantSilhouettes &&
+        densityLayerEnabled && (
+        <ErrorBoundary fallback={null}>
+          <SalmonShadowFishSilhouettes
+            density={
+              backgroundCloudDensity *
+              atmosphericDensity *
+              (atm?.shadowSilhouetteFish?.densityMul ?? 1)
+            }
+            speed={backgroundSwarmSpeed * backgroundMotionStrength * 0.55}
+            opacity={atm?.shadowSilhouetteFish?.opacity ?? 0.94}
+          />
+        </ErrorBoundary>
       )}
-      <DustParticles
-        count={Math.max(20, Math.round(particleCount * particleDepthDensity))}
+      {AQ_TYPO_TEST && <TypoEmergencyTest />}
+      {mountLettersEffective && (
+        <group position={[0, typographyWorldYOffset, 0]}>
+          <ErrorBoundary
+            fallback={<CanvasFloatingLetters {...floatingTypographyProps} />}
+          >
+            {AQ_TYPO_TROIKA ? (
+              <Suspense
+                fallback={
+                  <CanvasFloatingLetters {...floatingTypographyProps} />
+                }
+              >
+                <FloatingLetters {...floatingTypographyProps} />
+              </Suspense>
+            ) : (
+              <CanvasFloatingLetters {...floatingTypographyProps} />
+            )}
+          </ErrorBoundary>
+        </group>
+      )}
+      {(themeId !== 'salmonDaysRadio' || salmonRestoreStep >= 4) &&
+        (themeId !== 'swamp' || swampGates.particles) && (
+        <DustParticles
+        count={Math.max(
+          20,
+          Math.round(particleCount * safeParticleDepthDensity),
+        )}
         bounds={DUST_VOLUME}
         opacity={particleOpacity * (dustAtm.opacityMul ?? 1)}
         shimmerStrength={
@@ -1146,6 +1892,7 @@ export default function Scene() {
         }
         color={dustAtm.color ?? '#bcd5e6'}
       />
+      )}
       {/*
         Continuous ambient bubble field. Mounted alongside the dust
         so both suspended-life systems share the same render pass
@@ -1153,6 +1900,8 @@ export default function Scene() {
         and stays untouched -- the two bubble systems are
         complementary.
       */}
+      {(themeId !== 'salmonDaysRadio' || salmonRestoreStep >= 4) &&
+        (themeId !== 'swamp' || swampGates.bubbles) && (
       <AmbientBubbles
         maxCount={ambientBubbleCount}
         spawnRate={ambientBubbleSpawnRate}
@@ -1161,14 +1910,17 @@ export default function Scene() {
         sizeVariation={bubbleSizeVariation}
         bounds={BUBBLE_VOLUME}
       />
-      {!radioInTypography && (
-        <AmbientRadio
-          enabled={ambientRadioEnabled}
-          glowIntensity={radioGlowIntensity}
-          position={[radioPosition.x, radioPosition.y, radioPosition.z]}
-          beaconAtmosphere={theme.radio?.beaconAtmosphere}
-        />
       )}
+      {standaloneAmbientRadioShows ? (
+        <ErrorBoundary name="Scene.AmbientRadio.standalone" fallback={null}>
+          <AmbientRadio
+            enabled={ambientRadioEnabled}
+            glowIntensity={safeRadioGlowIntensity}
+            position={safeRadioPosition}
+            beaconAtmosphere={theme.radio?.beaconAtmosphere}
+          />
+        </ErrorBoundary>
+      ) : null}
     </>
   );
 }

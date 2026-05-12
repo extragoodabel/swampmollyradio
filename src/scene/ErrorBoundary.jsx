@@ -1,11 +1,10 @@
 import { Component } from 'react';
 
 /**
- * Minimal error boundary used to fall back to the procedural fish
- * texture if the SVG asset fails to load (404, parse error, etc).
- *
- * Suspense handles the "still loading" state; this handles the
- * "load failed" state, which Suspense alone cannot.
+ * Catches render errors in the hero fish pipeline. The `fallback`
+ * subtree must never re-use the same props that threw — use
+ * `EmergencyFishSchool` (literal safe props only) so the boundary
+ * cannot recurse into a second failure.
  */
 export default class ErrorBoundary extends Component {
   state = { hasError: false };
@@ -14,8 +13,13 @@ export default class ErrorBoundary extends Component {
     return { hasError: true };
   }
 
-  componentDidCatch(error) {
-    console.warn('[aquarium] texture load failed, falling back', error);
+  componentDidCatch(error, info) {
+    const label = this.props.name ?? 'Scene.ErrorBoundary';
+    console.warn(
+      `[aquarium] ${label} — subtree error (using fallback if any)`,
+      error?.message ?? error,
+      info?.componentStack ?? '',
+    );
   }
 
   render() {

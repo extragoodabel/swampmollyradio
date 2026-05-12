@@ -27,8 +27,8 @@ import * as THREE from 'three';
  *     origin. The inner radius is held open so the camera area
  *     stays clear; `distanceBias` pushes the rest of the population
  *     outward to give the "thicker in the distance" silhouette.
- *
- * Performance: with default settings (90 strands x 130 verts =
+ *   - Salmon Days Radio does not mount this component: very tall thin
+ *     ribbons in a radial shell tend to read as vertical line layers.
  * ~11.7k vertices in a single draw call) this is comfortably under
  * the cost of any of the other shader passes already in the scene.
  *
@@ -196,7 +196,10 @@ export default function KelpForest({
   abyssBlend = 0,
   /** Subtle vertical “current” shimmer in `visualMode === 'openOcean'`. */
   verticalDream = 0.12,
+  /** Phase speed for the open-ocean vertical dream (passed from theme / Scene). */
   dreamVerticalSpeed = 0.18,
+  /** Salmon Days: off; Swamp: on so strands occlude distant hull in the depth buffer. */
+  writeDepth = false,
   seed = 2024,
 }) {
   const meshRef = useRef();
@@ -217,7 +220,7 @@ export default function KelpForest({
         vertexShader: VERTEX_SHADER,
         fragmentShader: FRAGMENT_SHADER,
         transparent: true,
-        depthWrite: false,
+        depthWrite: writeDepth,
         side: THREE.DoubleSide,
         uniforms: {
           uTime: { value: 0 },
@@ -232,8 +235,7 @@ export default function KelpForest({
           uAbyssBlend: { value: 0 },
         },
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [writeDepth],
   );
 
   // Build the per-instance dataset once per (count, distanceBias,

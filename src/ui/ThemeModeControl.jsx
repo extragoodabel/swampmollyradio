@@ -1,12 +1,13 @@
 import { useEffect } from 'react';
-import { getTheme } from '../theme/themes.js';
+import { AQ_THEME_SWITCH_LOG } from '../debug/aquariumRecovery.js';
+import { getTheme, otherThemeId } from '../theme/themes.js';
 import { useTheme } from '../theme/ThemeContext.jsx';
 
 const SWAMP_ID = 'swamp';
 const SALMON_DAYS_RADIO_ID = 'salmonDaysRadio';
 
 /**
- * Compact atmosphere switch — single quiet line (two stations).
+ * Single portal-style link to the other aquarium (heading already names the active one).
  * Keyboard: 1 = Salmon Days Radio, 2 = Swamp Molly Radio (not shown in UI).
  */
 export default function ThemeModeControl() {
@@ -26,54 +27,77 @@ export default function ThemeModeControl() {
       }
       if (e.key === '1') {
         e.preventDefault();
+        if (AQ_THEME_SWITCH_LOG) {
+          let ls = null;
+          try {
+            ls = window.localStorage.getItem('aquarium-theme');
+          } catch {
+            /* ignore */
+          }
+          console.info('[theme-switch] keyboard → Salmon Days', {
+            currentThemeId: themeId,
+            requestedThemeId: SALMON_DAYS_RADIO_ID,
+            localStorageTheme: ls,
+          });
+        }
         setTheme(SALMON_DAYS_RADIO_ID);
       } else if (e.key === '2') {
         e.preventDefault();
+        if (AQ_THEME_SWITCH_LOG) {
+          let ls = null;
+          try {
+            ls = window.localStorage.getItem('aquarium-theme');
+          } catch {
+            /* ignore */
+          }
+          console.info('[theme-switch] keyboard → Swamp Molly', {
+            currentThemeId: themeId,
+            requestedThemeId: SWAMP_ID,
+            localStorageTheme: ls,
+          });
+        }
         setTheme(SWAMP_ID);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [setTheme]);
+  }, [setTheme, themeId]);
 
   useEffect(() => {
     document.documentElement.dataset.aquariumTheme = themeId;
   }, [themeId]);
 
-  const swamp = getTheme(SWAMP_ID);
-  const salmonDays = getTheme(SALMON_DAYS_RADIO_ID);
+  const destinationId = otherThemeId(themeId);
+  const destination = getTheme(destinationId);
 
   return (
-    <div
-      className="theme-mode"
-      role="toolbar"
-      aria-label="Aquarium atmosphere"
-    >
+    <nav className="theme-mode" aria-label="Visit another aquarium">
       <button
         type="button"
-        className={`theme-mode__btn${
-          themeId === SALMON_DAYS_RADIO_ID ? ' theme-mode__btn--active' : ''
-        }`}
-        onClick={() => setTheme(SALMON_DAYS_RADIO_ID)}
-        aria-pressed={themeId === SALMON_DAYS_RADIO_ID}
-        aria-label={salmonDays.displayName}
+        className="theme-mode__link"
+        onClick={() => {
+          if (AQ_THEME_SWITCH_LOG) {
+            let ls = null;
+            try {
+              ls = window.localStorage.getItem('aquarium-theme');
+            } catch {
+              /* ignore */
+            }
+            console.info('[theme-switch] mode control click', {
+              currentThemeId: themeId,
+              requestedThemeId: destinationId,
+              localStorageTheme: ls,
+            });
+          }
+          setTheme(destinationId);
+        }}
+        aria-label={`Go to ${destination.displayName}`}
       >
-        {salmonDays.switchLabel}
+        <span className="theme-mode__arrow" aria-hidden="true">
+          →{' '}
+        </span>
+        {destination.switchLabel}
       </button>
-      <span className="theme-mode__sep" aria-hidden="true">
-        ·
-      </span>
-      <button
-        type="button"
-        className={`theme-mode__btn${
-          themeId === SWAMP_ID ? ' theme-mode__btn--active' : ''
-        }`}
-        onClick={() => setTheme(SWAMP_ID)}
-        aria-pressed={themeId === SWAMP_ID}
-        aria-label={swamp.displayName}
-      >
-        {swamp.switchLabel}
-      </button>
-    </div>
+    </nav>
   );
 }

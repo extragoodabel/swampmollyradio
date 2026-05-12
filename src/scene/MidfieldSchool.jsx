@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useTexture } from '@react-three/drei';
 import * as THREE from 'three';
+import { useTheme } from '../theme/ThemeContext.jsx';
+import { mergeDistantFishEnv } from '../theme/themes.js';
 
 /**
  * Mid-distance instanced fish layer.
@@ -31,9 +33,9 @@ import * as THREE from 'three';
  *     write a translation + scale matrix per instance per frame.
  *   - Per-instance attributes (`aFlip`, `aOpacity`, `aPhase`) ride on
  *     the geometry as `InstancedBufferAttribute`s and never change.
- *   - The shader does its own depth-based fog tint so distant
- *     midfield fish dissolve into `fogColor` and (mostly) fade out
- *     rather than popping at the far plane.
+ *   - The shader does fog-style *colour* extinction toward `fogColor`, a
+ *     dark silhouette term, and rim darkening — alpha stays solid so
+ *     instances participate in depth tests / occlusion like opaque sprites.
  */
 
 const VERTEX_SHADER = /* glsl */ `
@@ -43,6 +45,7 @@ const VERTEX_SHADER = /* glsl */ `
 
   uniform float uTime;
   uniform float uAspect;
+  uniform float uWagMul;
 
   varying vec2 vUv;
   varying float vOpacity;
@@ -60,7 +63,7 @@ const VERTEX_SHADER = /* glsl */ `
     // Tiny tail-wag wiggle on the bottom-half corners only, so the
     // silhouette has a faint sense of swimming. position.x runs -0.5..0.5
     // and position.y runs -0.5..0.5 for a unit PlaneGeometry.
-    float wag = sin(uTime * 2.4 + aPhase) * 0.025;
+    float wag = sin(uTime * 2.4 + aPhase) * 0.025 * uWagMul;
     float wagShape = step(position.x, 0.0); // only the tail half
 
     vec2 quad = vec2(
@@ -90,12 +93,17 @@ const VERTEX_SHADER = /* glsl */ `
 
 const FRAGMENT_SHADER = /* glsl */ `
   uniform sampler2D uMap;
+  uniform float uTime;
   uniform vec3 uFogColor;
   uniform float uFogNear;
   uniform float uFogFar;
   uniform float uOpacityMul;
   uniform float uWorldRadius;
   uniform float uPeripheral;
+  uniform float uSaturation;
+  uniform float uFlickerAmp;
+  uniform float uFogLerp;
+  uniform float uAtmosphereCrush;
 
   varying vec2 vUv;
   varying float vOpacity;
@@ -110,25 +118,34 @@ const FRAGMENT_SHADER = /* glsl */ `
     vec4 tex = texture2D(uMap, uv);
     if (tex.a < 0.04) discard;
 
-    // Depth fade matched to the scene fog. Midfield fish should
-    // dissolve into the water medium rather than vanish.
     float fog = clamp(
       (vDepth - uFogNear) / max(0.0001, uFogFar - uFogNear),
       0.0, 1.0
     );
 
-    // Radial edge fade: as a fish approaches the periphery of the
-    // surround sphere, its opacity bleeds toward the uPeripheral
-    // multiplier. This is what gives the volume "breathing space"
-    // and stops the rim from feeling crowded.
-    float rim = smoothstep(0.4, 1.0, vCamDist / max(0.0001, uWorldRadius));
-    float edgeFade = mix(1.0, uPeripheral, rim);
+    // Atmospheric perspective: dissolve *detail* into the water colour,
+    // darken into silhouette — keep alpha solid so instances occlude.
+    float fogT = pow(fog, 1.12);
+    float crush = mix(0.88, 1.22, clamp((uAtmosphereCrush - 0.5) / 2.5, 0.0, 1.0));
+    fogT = clamp(fogT * crush, 0.0, 1.0);
 
-    // Stronger fog tint than before -- distant fish should read as
-    // colored water, not as sharply-defined fish.
-    vec3 color = mix(tex.rgb, uFogColor, fog * 0.92);
-    float alpha = tex.a * vOpacity * uOpacityMul * edgeFade
-                * (1.0 - fog * 0.7);
+    float rim = smoothstep(0.4, 1.0, vCamDist / max(0.0001, uWorldRadius));
+    float rimAtten = mix(1.0, uPeripheral, rim);
+
+    float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
+    vec3 texAdj = mix(vec3(lum), tex.rgb, uSaturation);
+
+    vec3 sil = uFogColor * vec3(0.16, 0.2, 0.24);
+    vec3 color = mix(texAdj, uFogColor, fogT * uFogLerp);
+    color = mix(color, sil, fogT * 0.55);
+    color *= (1.0 - fogT * 0.42);
+    color *= mix(0.38, 1.0, rimAtten);
+
+    float flick =
+      1.0 + uFlickerAmp * sin(uTime * 2.05 + vCamDist * 0.11 + vDepth * 0.04);
+    color *= flick;
+
+    float alpha = tex.a * vOpacity * uOpacityMul;
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -140,13 +157,21 @@ function MidfieldImpl({
   verticalSpread,
   swimSpeed,
   distantFishOpacity,
+  atmosphereCrush = 1,
   fogColor,
   fogNear,
   fogFar,
+  peripheralDensity,
   texture,
 }) {
   const meshRef = useRef();
   const { camera } = useThree();
+  const { theme } = useTheme();
+  const env = useMemo(() => mergeDistantFishEnv(theme), [theme]);
+
+  const effRadius = worldRadius * env.midfieldWorldRadiusMul;
+  const effVert = verticalSpread * env.midfieldVerticalSpreadMul;
+  const effCount = Math.max(1, Math.round(count * env.midfieldCountMul));
 
   // Texture aspect drives plane width; salmon SVG is 2:1.
   const aspect = useMemo(() => {
@@ -158,24 +183,21 @@ function MidfieldImpl({
   // CPU-side per-instance state. Reallocated only when `count` /
   // `worldRadius` / `verticalSpread` change.
   const state = useMemo(() => {
-    const pos = new Float32Array(count * 3);
-    const vel = new Float32Array(count * 3);
-    const scale = new Float32Array(count);
-    const flip = new Float32Array(count);
-    const opacity = new Float32Array(count);
-    const phase = new Float32Array(count);
+    const pos = new Float32Array(effCount * 3);
+    const vel = new Float32Array(effCount * 3);
+    const scale = new Float32Array(effCount);
+    const flip = new Float32Array(effCount);
+    const opacity = new Float32Array(effCount);
+    const phase = new Float32Array(effCount);
 
     const cameraPos = new THREE.Vector3();
     camera.getWorldPosition(cameraPos);
 
-    const verticalRatio = verticalSpread / worldRadius;
+    const verticalRatio = effVert / effRadius;
+    const vm = env.midfieldVelMul;
 
-    for (let i = 0; i < count; i++) {
-      // Distribute on/inside a sphere around the camera. Bias toward
-      // the outside (Math.pow(rng, 0.65)) so the shell of the volume
-      // is denser than dead-center; the hero fish handle the close-in
-      // band.
-      const r = worldRadius * (0.35 + 0.65 * Math.pow(Math.random(), 0.65));
+    for (let i = 0; i < effCount; i++) {
+      const r = effRadius * (0.35 + 0.65 * Math.pow(Math.random(), 0.65));
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
 
@@ -183,21 +205,21 @@ function MidfieldImpl({
       pos[i * 3 + 1] = cameraPos.y + r * Math.cos(phi) * verticalRatio;
       pos[i * 3 + 2] = cameraPos.z + r * Math.sin(phi) * Math.sin(theta);
 
-      const dir = Math.random() < 0.55 ? 1 : -1; // slight rightward bias
+      const dir = Math.random() < 0.55 ? 1 : -1;
       flip[i] = dir;
-      vel[i * 3 + 0] = (0.18 + Math.random() * 0.35) * dir;
-      vel[i * 3 + 1] = (Math.random() - 0.5) * 0.05;
-      vel[i * 3 + 2] = (Math.random() - 0.5) * 0.08;
+      vel[i * 3 + 0] = (0.18 + Math.random() * 0.35) * dir * vm;
+      vel[i * 3 + 1] = (Math.random() - 0.5) * 0.05 * vm;
+      vel[i * 3 + 2] = (Math.random() - 0.5) * 0.08 * vm;
 
-      // Smaller and more variable than hero fish, so they read as
-      // farther even when they happen to drift close.
-      scale[i] = 0.35 + Math.random() * 0.55;
-      opacity[i] = 0.55 + Math.random() * 0.45;
+      scale[i] = env.midfieldScaleMin + Math.random() * env.midfieldScaleRange;
+      opacity[i] =
+        env.midfieldOpacityAttrMin +
+        Math.random() * env.midfieldOpacityAttrRange;
       phase[i] = Math.random() * Math.PI * 2;
     }
 
     return { pos, vel, scale, flip, opacity, phase };
-  }, [count, worldRadius, verticalSpread, camera]);
+  }, [effCount, effRadius, effVert, env, camera]);
 
   // Geometry + per-instance attribute buffers. Recreated when count
   // changes because InstancedBufferAttribute size is fixed.
@@ -229,28 +251,52 @@ function MidfieldImpl({
         uMap: { value: texture },
         uTime: { value: 0 },
         uAspect: { value: aspect },
+        uWagMul: { value: env.midfieldWagMul },
         uFogColor: { value: new THREE.Color(fogColor) },
         uFogNear: { value: fogNear },
         uFogFar: { value: fogFar },
-        uOpacityMul: { value: distantFishOpacity },
+        uOpacityMul: { value: distantFishOpacity * env.midfieldOpacityMul },
+        uWorldRadius: { value: effRadius },
+        uPeripheral: { value: peripheralDensity },
+        uSaturation: { value: env.midfieldSaturation },
+        uFlickerAmp: { value: env.midfieldFlickerAmp },
+        uFogLerp: { value: env.midfieldFogLerp },
+        uAtmosphereCrush: { value: atmosphereCrush },
       },
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
     });
-    // We update uniforms imperatively below; recreating the material
-    // on every uniform change would thrash the GPU.
+    // Shader + texture only — scalar uniforms updated in `useEffect`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [texture, aspect]);
 
-  // Push leva-driven values into uniforms without rebuilding material.
+  // Push Leva + theme-driven values into uniforms without rebuilding material.
   useEffect(() => {
     if (!material) return;
-    material.uniforms.uOpacityMul.value = distantFishOpacity;
-    material.uniforms.uFogColor.value.set(fogColor);
-    material.uniforms.uFogNear.value = fogNear;
-    material.uniforms.uFogFar.value = fogFar;
-  }, [material, distantFishOpacity, fogColor, fogNear, fogFar]);
+    const u = material.uniforms;
+    u.uOpacityMul.value = distantFishOpacity * env.midfieldOpacityMul;
+    u.uFogColor.value.set(fogColor);
+    u.uFogNear.value = fogNear;
+    u.uFogFar.value = fogFar;
+    u.uWorldRadius.value = effRadius;
+    u.uPeripheral.value = peripheralDensity;
+    u.uWagMul.value = env.midfieldWagMul;
+    u.uSaturation.value = env.midfieldSaturation;
+    u.uFlickerAmp.value = env.midfieldFlickerAmp;
+    u.uFogLerp.value = env.midfieldFogLerp;
+    u.uAtmosphereCrush.value = atmosphereCrush;
+  }, [
+    material,
+    distantFishOpacity,
+    fogColor,
+    fogNear,
+    fogFar,
+    effRadius,
+    peripheralDensity,
+    env,
+    atmosphereCrush,
+  ]);
 
   // Initialise instanceMatrix once, mark dynamic so the per-frame
   // updates don't reallocate buffers.
@@ -259,7 +305,7 @@ function MidfieldImpl({
     if (!mesh) return;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     const tmp = new THREE.Object3D();
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < effCount; i++) {
       tmp.position.set(
         state.pos[i * 3 + 0],
         state.pos[i * 3 + 1],
@@ -272,7 +318,7 @@ function MidfieldImpl({
       mesh.setMatrixAt(i, tmp.matrix);
     }
     mesh.instanceMatrix.needsUpdate = true;
-  }, [count, state]);
+  }, [effCount, state]);
 
   // Shared scratch objects to avoid allocations in the hot loop.
   const scratch = useMemo(
@@ -292,22 +338,23 @@ function MidfieldImpl({
     camera.getWorldPosition(scratch.cam);
 
     const dt = Math.min(delta, 0.05); // tab-switch safety
-    const vRatio = verticalSpread / worldRadius;
-    const radius = worldRadius * 1.08;
+    const vRatio = effVert / effRadius;
+    const radius = effRadius * 1.08;
     const radiusSq = radius * radius;
+    const swim = swimSpeed * env.midfieldSwimSpeedMul;
     // Shared global drift -- a single sine evaluation broadcast to all
     // fish. Keeps the layer cheap while still adding a wave-like feel.
-    const driftY = Math.sin(t * 0.45) * 0.04;
-    const driftX = Math.cos(t * 0.32) * 0.06;
+    const driftY = Math.sin(t * 0.45) * 0.032;
+    const driftX = Math.cos(t * 0.32) * 0.048;
 
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < effCount; i++) {
       const ix = i * 3;
 
       state.pos[ix + 0] +=
-        (state.vel[ix + 0] + driftX) * dt * swimSpeed;
+        (state.vel[ix + 0] + driftX) * dt * swim;
       state.pos[ix + 1] +=
-        (state.vel[ix + 1] + driftY) * dt * swimSpeed;
-      state.pos[ix + 2] += state.vel[ix + 2] * dt * swimSpeed;
+        (state.vel[ix + 1] + driftY) * dt * swim;
+      state.pos[ix + 2] += state.vel[ix + 2] * dt * swim;
 
       // Camera-relative wrap. Treat the volume as an ellipsoid so the
       // vertical extent (`verticalSpread`) can be smaller than the
@@ -325,7 +372,7 @@ function MidfieldImpl({
         const nx = -dx / len;
         const ny = -dyW / len;
         const nz = -dz / len;
-        const r = worldRadius * (0.72 + Math.random() * 0.22);
+        const r = effRadius * (0.72 + Math.random() * 0.22);
         state.pos[ix + 0] =
           scratch.cam.x + nx * r + (Math.random() - 0.5) * 0.6;
         state.pos[ix + 1] =
@@ -351,7 +398,7 @@ function MidfieldImpl({
   return (
     <instancedMesh
       ref={meshRef}
-      args={[geometry, material, count]}
+      args={[geometry, material, effCount]}
       frustumCulled={false}
       // Decorative -- never block pointer events from the radio beacon
       // or other interactive props.
@@ -372,6 +419,8 @@ export default function MidfieldSchool({
   verticalSpread = 12,
   swimSpeed = 0.6,
   distantFishOpacity = 0.55,
+  atmosphereCrush = 1,
+  peripheralDensity = 0.25,
   fogColor = '#0e3850',
   fogNear = 4,
   fogFar = 28,
@@ -394,6 +443,8 @@ export default function MidfieldSchool({
       verticalSpread={verticalSpread}
       swimSpeed={swimSpeed}
       distantFishOpacity={distantFishOpacity}
+      atmosphereCrush={atmosphereCrush}
+      peripheralDensity={peripheralDensity}
       fogColor={fogColor}
       fogNear={fogNear}
       fogFar={fogFar}

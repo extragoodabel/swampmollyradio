@@ -99,7 +99,7 @@ like grabbing the inside of a sphere (Google Street View model).
 | drag   | `dragDamping`              | 0 = infinite glide, 1 = instant stop. Default 0.7            |
 | drag   | `inertiaStrength`          | scaling on release velocity (0 = no inertia, 3 = long glide) |
 | drag   | `maxPitchDegrees`          | clamp pitch (default 70deg) so the view can't flip           |
-| school | `fishDistanceOpacityStrength` | 0 = distant fish stay full alpha, 1 = old "fade with z" |
+| density | `heroFishDominance`       | deepens *silhouette* / fog crush on distant layers (not sprite alpha) |
 | water  | `fogColor`                 | tint of `THREE.Fog` AND of the haze layers (linked)          |
 | water  | `fogNear`                  | distance at which scene fog starts (replaces `fogDensity`)   |
 | water  | `fogFar`                   | distance at which scene fog is opaque                        |
@@ -168,8 +168,10 @@ Three orthogonal pieces:
 2. **Cluster-level shared params** (`FishSchool.jsx`): fish in the same
    cluster share a base speed and base direction, so they travel together
    over time instead of slowly diffusing.
-3. **Per-fish jitter on top**: scale, opacity, wiggle phase, and small
-   speed jitter break up any "marching formation" feel.
+3. **Per-fish jitter on top**: scale, wiggle phase, and small speed
+   jitter break up any "marching formation" feel. Distant fish stay
+   **opaque**; depth reads from colour (desaturation + fog tint + darken),
+   not transparency.
 
 ## Fish art
 
@@ -218,10 +220,14 @@ distinct effects:
 3. **`BackgroundField.jsx`** sits even further back with its own
    subdivided displacement shader. It picks up the same `fogColor`
    so the deep distance dissolves into the same medium.
-4. **`fishDistanceOpacityStrength`** decouples fish opacity from depth.
-   At its default `0.4`, distant fish stay around 70-80% opacity instead
-   of dropping to 30%. They no longer "vanish" -- the haze + fog
-   obscures them visually while they remain materially present.
+4. **Hero + midfield depth**: `atmosphere.heroFishAtmosphere` (per theme)
+   drives **atmospheric perspective** on the hero school — blend toward
+   water tones, crush contrast, occasional silver glints (Salmon Days).
+   Midfield instanced fish use the same idea in
+   `MidfieldSchool.jsx` (silhouette + fog colour, solid alpha +
+   `depthWrite`). The Leva slider `heroFishDominance` scales how strongly
+   distant layers go to silhouette, without turning them into glassy
+   transparent stacks.
 
 `particleDepthDensity` scales the dust count and `DUST_VOLUME.z` is
 widened to 24 so suspended particles populate the entire visible depth.

@@ -7,7 +7,13 @@ import {
   useRef,
   useState,
 } from 'react';
-import { DEFAULT_STATION_ID, getStation } from './stations.js';
+import {
+  dialStationAt,
+  getDialStationIndex,
+  getStation,
+  normalizeDialStationId,
+  SOMA_FM_DIAL_STATIONS,
+} from './stations.js';
 
 /**
  * Single source of truth for the ambient radio.
@@ -46,11 +52,28 @@ function clamp01(v) {
   return Math.min(1, Math.max(0, v));
 }
 
-export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
-  // Resolve the active station from the (theme-driven) stationId
-  // prop. Memoised so child memo deps that reference `station` are
-  // stable until the prop actually changes.
-  const station = useMemo(() => getStation(stationId), [stationId]);
+function delay(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+export function RadioProvider({
+  themeId,
+  themeDefaultStationId,
+  children,
+}) {
+  const normalizedDefault = useMemo(
+    () => normalizeDialStationId(themeDefaultStationId),
+    [themeDefaultStationId],
+  );
+
+  const [activeStationId, setActiveStationId] = useState(normalizedDefault);
+  const activeStationIdRef = useRef(activeStationId);
+  activeStationIdRef.current = activeStationId;
+
+  const station = useMemo(
+    () => getStation(activeStationId),
+    [activeStationId],
+  );
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -59,17 +82,24 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
   const [nowPlaying, setNowPlaying] = useState(null);
   const [filterAttached, setFilterAttached] = useState(false);
 
-  // Refs keep latest control values without forcing re-renders into
-  // the audio graph each frame.
   const volumeRef = useRef(0.5);
   const filterStrengthRef = useRef(0.55);
   const enabledRef = useRef(true);
 
   const audioRef = useRef(null);
   const graphRef = useRef(null);
-  // Mirror of isPlaying for use inside async callbacks / setTimeout.
   const playingRef = useRef(false);
   playingRef.current = isPlaying;
+
+  const swapLockRef = useRef(false);
+  const lastThemeIdRef = useRef(themeId);
+
+  /**
+   * Synchronous flag read by `CameraRig` (via microtask-deferred pointerdown)
+   * so grabbing the radio beacon never starts a concurrent world-drag on the
+   * canvas. Set `true` on beacon pointer down, `false` on up/cancel/lost capture.
+   */
+  const beaconNavSuspendedRef = useRef(false);
 
   const buildAudioElement = useCallback(
     (useCors) => {
@@ -77,8 +107,6 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
       if (useCors) a.crossOrigin = 'anonymous';
       a.preload = 'none';
       a.src = station.streamUrl;
-      // We let the gain node handle volume when the Web Audio graph
-      // is in play; otherwise we drive a.volume directly during fades.
       a.volume = 1;
       return a;
     },
@@ -114,7 +142,7 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
       const source = ctx.createMediaElementSource(audio);
       const lowpass = ctx.createBiquadFilter();
       lowpass.type = 'lowpass';
-      lowpass.frequency.value = 950; // muffled, underwater-ish
+      lowpass.frequency.value = 950;
       lowpass.Q.value = 0.6;
 
       const dry = ctx.createGain();
@@ -123,7 +151,7 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
 
       dry.gain.value = clamp01(1 - filterStrengthRef.current);
       wet.gain.value = clamp01(filterStrengthRef.current);
-      master.gain.value = 0; // silent until first play()
+      master.gain.value = 0;
 
       source.connect(dry);
       source.connect(lowpass);
@@ -136,9 +164,6 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
       setFilterAttached(true);
       return graphRef.current;
     } catch (e) {
-      // Most commonly: MediaElementSource can't be created because the
-      // element is already used elsewhere, or the source is tainted.
-      // Either way we proceed without a graph.
       console.warn('[radio] Web Audio graph not available:', e?.message ?? e);
       return null;
     }
@@ -153,12 +178,13 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
       g.master.gain.setValueAtTime(current, now);
       g.master.gain.linearRampToValueAtTime(target, now + durationSec);
     } else if (audioRef.current) {
-      // No graph -- ramp audio.volume manually.
       const a = audioRef.current;
       const start = a.volume;
       const startedAt = performance.now();
       const tick = () => {
-        const t = clamp01((performance.now() - startedAt) / (durationSec * 1000));
+        const t = clamp01(
+          (performance.now() - startedAt) / (durationSec * 1000),
+        );
         a.volume = clamp01(start + (target - start) * t);
         if (t < 1 && playingRef.current === (target > 0)) {
           requestAnimationFrame(tick);
@@ -170,8 +196,6 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
 
   const attemptPlay = useCallback(
     async (audio) => {
-      // Browsers reject play() if the AudioContext is suspended on a
-      // user gesture; resuming a no-op if already running is cheap.
       const g = graphRef.current;
       if (g && g.ctx.state === 'suspended') {
         await g.ctx.resume();
@@ -179,6 +203,26 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
       return audio.play();
     },
     [],
+  );
+
+  /** Try stream URL list on an existing element (plain / no-CORS rebuild handled by caller). */
+  const playUrlsOnElement = useCallback(
+    async (audio, urls) => {
+      let lastErr;
+      for (const url of urls) {
+        try {
+          audio.src = url;
+          audio.load();
+          await attemptPlay(audio);
+          return true;
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      console.warn('[radio] stream URLs failed:', lastErr);
+      return false;
+    },
+    [attemptPlay],
   );
 
   const play = useCallback(async () => {
@@ -190,9 +234,18 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
     if (!audio) {
       audio = buildAudioElement(true);
       audioRef.current = audio;
+      audio.dataset.radioStationId = station.id;
+    } else if (audio.dataset.radioStationId !== station.id) {
+      try {
+        audio.pause();
+      } catch {
+        /* ignore */
+      }
+      audio.dataset.radioStationId = station.id;
+      audio.src = station.streamUrl;
+      audio.load();
     }
 
-    // First try: with crossOrigin + Web Audio graph attached.
     let graph = graphRef.current;
     if (!graph) {
       attachGraph(audio);
@@ -210,9 +263,6 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
       );
     }
 
-    // If the CORS-flavoured element didn't play, rebuild without
-    // crossOrigin (tears down the Web Audio graph -- filter will be a
-    // no-op for this session).
     if (!played) {
       teardownGraph();
       try {
@@ -222,29 +272,13 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
       }
       audio = buildAudioElement(false);
       audioRef.current = audio;
+      audio.dataset.radioStationId = station.id;
 
-      // Manual fade-in via audio.volume since there's no master gain.
       audio.volume = 0;
-      try {
-        await attemptPlay(audio);
-        played = true;
-      } catch (secondErr) {
-        // Try station fallback URLs in plain mode.
-        for (const url of station.fallbacks ?? []) {
-          try {
-            audio.src = url;
-            audio.load();
-            await attemptPlay(audio);
-            played = true;
-            break;
-          } catch {
-            /* try next */
-          }
-        }
-        if (!played) {
-          console.warn('[radio] all play attempts failed:', secondErr);
-          setError('Stream unreachable. Try again in a moment.');
-        }
+      const urls = [station.streamUrl, ...(station.fallbacks ?? [])];
+      played = await playUrlsOnElement(audio, urls);
+      if (!played) {
+        setError('Stream unreachable. Try again in a moment.');
       }
     }
 
@@ -252,7 +286,6 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
     if (played) {
       setIsPlaying(true);
       setHasEverPlayed(true);
-      // Master fade-in (Web Audio path) or audio.volume ramp (fallback).
       fadeMasterTo(volumeRef.current, FADE_SECONDS);
     }
   }, [
@@ -260,7 +293,10 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
     attemptPlay,
     buildAudioElement,
     fadeMasterTo,
+    playUrlsOnElement,
     station.fallbacks,
+    station.id,
+    station.streamUrl,
     teardownGraph,
   ]);
 
@@ -269,9 +305,7 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
     if (!audio) return;
     fadeMasterTo(0, FADE_SECONDS);
     setIsPlaying(false);
-    // Actually stop the network stream after the fade so the user
-    // doesn't sit on bytes they can't hear.
-    const stopAt = setTimeout(() => {
+    setTimeout(() => {
       if (!playingRef.current && audio) {
         try {
           audio.pause();
@@ -280,13 +314,86 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
         }
       }
     }, FADE_SECONDS * 1000 + 80);
-    return () => clearTimeout(stopAt);
   }, [fadeMasterTo]);
 
   const toggle = useCallback(() => {
     if (playingRef.current) pause();
     else play();
   }, [pause, play]);
+
+  const swapToStationId = useCallback(
+    async (newId) => {
+      const target = normalizeDialStationId(newId);
+      if (target === activeStationIdRef.current) return;
+      if (swapLockRef.current) return;
+      swapLockRef.current = true;
+
+      try {
+        const next = getStation(target);
+
+        if (!playingRef.current) {
+          setActiveStationId(target);
+          setNowPlaying(null);
+          setError(null);
+          const audio = audioRef.current;
+          if (audio) {
+            try {
+              audio.pause();
+            } catch {
+              /* ignore */
+            }
+            audio.dataset.radioStationId = target;
+            audio.src = next.streamUrl;
+            audio.load();
+          }
+          return;
+        }
+
+        setIsLoading(true);
+        setError(null);
+        fadeMasterTo(0, FADE_SECONDS);
+        await delay(FADE_SECONDS * 1000 + 70);
+
+        setActiveStationId(target);
+        setNowPlaying(null);
+
+        const audio = audioRef.current;
+        if (!audio) {
+          setIsLoading(false);
+          return;
+        }
+
+        const urls = [next.streamUrl, ...(next.fallbacks ?? [])];
+        const ok = await playUrlsOnElement(audio, urls);
+
+        setIsLoading(false);
+        if (ok) {
+          playingRef.current = true;
+          setIsPlaying(true);
+          fadeMasterTo(volumeRef.current, FADE_SECONDS);
+        } else {
+          setError('Stream unreachable. Try again in a moment.');
+          playingRef.current = false;
+          setIsPlaying(false);
+        }
+      } finally {
+        swapLockRef.current = false;
+      }
+    },
+    [fadeMasterTo, playUrlsOnElement],
+  );
+
+  const nextStation = useCallback(() => {
+    const idx = getDialStationIndex(activeStationIdRef.current);
+    const nextId = dialStationAt(idx + 1);
+    void swapToStationId(nextId);
+  }, [swapToStationId]);
+
+  const previousStation = useCallback(() => {
+    const idx = getDialStationIndex(activeStationIdRef.current);
+    const nextId = dialStationAt(idx - 1);
+    void swapToStationId(nextId);
+  }, [swapToStationId]);
 
   const setVolume = useCallback((v) => {
     volumeRef.current = clamp01(v);
@@ -324,7 +431,6 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
     [pause],
   );
 
-  // Now-playing polling. Best-effort; CORS or 404 silently no-op.
   useEffect(() => {
     if (!isPlaying || !station.nowPlayingUrl) {
       setNowPlaying(null);
@@ -352,7 +458,6 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
     };
   }, [isPlaying, station.nowPlayingUrl]);
 
-  // Cleanup on unmount.
   useEffect(() => {
     return () => {
       try {
@@ -364,19 +469,16 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
     };
   }, [teardownGraph]);
 
-  // Station change (theme toggle). Stop the current stream and reset
-  // playback state so the next play() builds a fresh element pointing
-  // at the new URL. We deliberately *don't* auto-resume on the new
-  // station: switching modes is a deliberate context change, and
-  // bridging it with audio would feel jarring.
-  const lastStationIdRef = useRef(stationId);
+  /**
+   * Theme toggle: reset dial default + hard-stop audio (same as legacy
+   * `stationId` change — no crossfade across aquarium modes).
+   */
   useEffect(() => {
-    if (lastStationIdRef.current === stationId) return;
-    lastStationIdRef.current = stationId;
+    if (lastThemeIdRef.current === themeId) return;
+    lastThemeIdRef.current = themeId;
 
-    // Stop playback and discard the current audio element so the
-    // next play() sees a clean slate. The Web Audio graph (if any)
-    // was hooked to the old element, so it has to go with it.
+    setActiveStationId(normalizeDialStationId(themeDefaultStationId));
+
     if (audioRef.current) {
       try {
         audioRef.current.pause();
@@ -391,13 +493,27 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
     setIsLoading(false);
     setError(null);
     setNowPlaying(null);
-    // hasEverPlayed is intentionally preserved -- the overlay's
-    // "tap the beacon to resume" hint is still relevant after a
-    // mode switch.
-  }, [stationId, teardownGraph]);
+  }, [themeId, themeDefaultStationId, teardownGraph]);
+
+  /**
+   * When the default station id string for the *current* theme updates
+   * (not a theme switch), keep dial in sync only if user is still on a
+   * stale id — normally no-op.
+   */
+  useEffect(() => {
+    setActiveStationId((cur) =>
+      cur === normalizedDefault ? cur : cur,
+    );
+  }, [normalizedDefault]);
+
+  const activeStationIndex = getDialStationIndex(activeStationId);
 
   const value = {
     station,
+    stationsDial: SOMA_FM_DIAL_STATIONS,
+    activeStationId,
+    activeStationIndex,
+    dialStationCount: SOMA_FM_DIAL_STATIONS.length,
     isPlaying,
     isLoading,
     error,
@@ -407,9 +523,13 @@ export function RadioProvider({ stationId = DEFAULT_STATION_ID, children }) {
     toggle,
     play,
     pause,
+    nextStation,
+    previousStation,
+    swapToStationId,
     setVolume,
     setFilterStrength,
     setEnabled,
+    beaconNavSuspendedRef,
   };
 
   return <RadioCtx.Provider value={value}>{children}</RadioCtx.Provider>;

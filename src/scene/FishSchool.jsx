@@ -3,6 +3,13 @@ import Fish from './Fish.jsx';
 import { FISH_VARIANT_COUNT } from './assets/fishTexture.js';
 import ScatterManager from './scatter/ScatterManager.jsx';
 import BubbleTrails from './scatter/BubbleTrails.jsx';
+import {
+  guardClusterCount,
+  guardHeroFishCount,
+  guardSatelliteFishCount,
+  guardSchoolBounds,
+  guardSchoolSpread,
+} from './runtimeGuards.js';
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -47,11 +54,16 @@ function buildTint(rand) {
   return [lerp(1.0, 0.88, k), lerp(1.0, 0.95, k), 1.0];
 }
 
-function buildClusters(rand, clusterCount, bounds, spread) {
+function buildClusters(rand, clusterCount, bounds, spread, anchorY = 0) {
   const clusters = [];
-  for (let i = 0; i < clusterCount; i++) {
+  const k =
+    Number.isFinite(clusterCount) && clusterCount >= 2
+      ? Math.floor(clusterCount)
+      : 4;
+  for (let i = 0; i < k; i++) {
     const cx = (rand() * 2 - 1) * bounds.x * 0.55 * spread;
-    const cy = (rand() * 2 - 1) * bounds.y * 0.55 * spread;
+    const cy =
+      (rand() * 2 - 1) * bounds.y * 0.55 * spread + anchorY;
     // Slightly forward bias so more fish read in mid / foreground at
     // load (depth hierarchy vs. a uniform sheet at the back plane).
     const depthBias = Math.pow(rand(), 1.38);
@@ -94,7 +106,6 @@ export default function FishSchool({
   clusterCount = 4,
   foregroundCrossingChance = 0.15,
   avoidanceRadius = 1.2,
-  fishDistanceOpacityStrength = 0.4,
   texture,
   // Optional second texture used for the single "#99 rider" salmon.
   // When present, exactly one fish in the school will use it.
@@ -136,6 +147,14 @@ export default function FishSchool({
   maxBubbles = 120,
   /** Per-fish volume lighting from the cinematic beam (theme + Leva position). */
   lightBeam = null,
+  /** Adds to cluster centres in Y so the school can sit slightly below the typography line. */
+  clusterAnchorY = 0,
+  heroDepthCue = null,
+  /**
+   * `hero` — population rails 20–180. `satellite` — smaller secondary schools
+   * (6–40) for vertical / surround layers without duplicating hero mass.
+   */
+  countMode = 'hero',
 }) {
   // Shared mutable context. Each Fish pushes its registry entry on
   // mount (and writes its world position to it each frame). The
@@ -149,11 +168,35 @@ export default function FishSchool({
   }).current;
   const fish = useMemo(() => {
     const rand = mulberry32(seed);
-    const clusters = buildClusters(rand, clusterCount, bounds, spread);
+    const k = guardClusterCount(clusterCount, 'FishSchool.clusterCount');
+    const boundsSafe = guardSchoolBounds(bounds, 'FishSchool.bounds');
+    const spreadSafe = guardSchoolSpread(spread, 'FishSchool.spread');
+    const anchorY = Number.isFinite(Number(clusterAnchorY))
+      ? clusterAnchorY
+      : 0;
+    let clusters = buildClusters(rand, k, boundsSafe, spreadSafe, anchorY);
+    if (clusters.length === 0) {
+      console.warn(
+        '[aquarium] FishSchool: empty cluster build — rebuilding with k=4',
+      );
+      clusters = buildClusters(rand, 4, boundsSafe, spreadSafe, anchorY);
+    }
+    const nCl = clusters.length;
+    if (nCl === 0) {
+      console.warn(
+        '[aquarium] FishSchool: still no clusters after rebuild — zero fish',
+      );
+      return [];
+    }
+
+    const safeCount =
+      countMode === 'satellite'
+        ? guardSatelliteFishCount(count, 'FishSchool.satelliteCount')
+        : guardHeroFishCount(count, 'FishSchool.count');
 
     const arr = [];
-    for (let i = 0; i < count; i++) {
-      const cluster = clusters[i % clusters.length];
+    for (let i = 0; i < safeCount; i++) {
+      const cluster = clusters[i % nCl];
 
       const along = rand() * 2 - 1;
       const lateral = (rand() * 2 - 1) * 0.6;
@@ -178,7 +221,7 @@ export default function FishSchool({
         y *= 0.8;
       }
 
-      const closeness = clamp((z + bounds.z) / (bounds.z + 6), 0, 1);
+      const closeness = clamp((z + boundsSafe.z) / (boundsSafe.z + 6), 0, 1);
 
       const direction =
         rand() > 0.08 ? cluster.baseDirection : -cluster.baseDirection;
@@ -194,7 +237,7 @@ export default function FishSchool({
       const phase = rand() * Math.PI * 2;
       const variant = Math.floor(rand() * FISH_VARIANT_COUNT);
 
-      const opacity = lerp(0.3, 1.0, Math.pow(closeness, 0.75));
+      const opacity = 1;
 
       const { layer, extraParallax } = layerFromZ(z);
 
@@ -254,6 +297,8 @@ export default function FishSchool({
     foregroundCrossingChance,
     enableRider,
     riderGlowBoost,
+    clusterAnchorY,
+    countMode,
   ]);
 
   return (
@@ -286,7 +331,6 @@ export default function FishSchool({
           swimSpeed={swimSpeed}
           shimmerIntensity={shimmerIntensity}
           avoidanceRadius={avoidanceRadius}
-          fishDistanceOpacityStrength={fishDistanceOpacityStrength}
           texture={texture}
           riderTexture={riderTexture}
           isRider={f.isRider}
@@ -294,6 +338,7 @@ export default function FishSchool({
           textureFacesLeft={textureFacesLeft}
           baseWidth={baseWidth}
           lightBeam={lightBeam}
+          heroDepthCue={heroDepthCue}
         />
       ))}
       <ScatterManager

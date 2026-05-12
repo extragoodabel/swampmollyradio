@@ -3,9 +3,9 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
 /**
- * Salmon Days only: camera-centered sky sphere for infinite abyss below and
- * soft overhead surface glow — no finite plane edges. Fills the canvas with
- * volumetric-feeling depth; pairs with the distant BackgroundField light sheet.
+ * Salmon Days only: camera-centered sky sphere — abyss below, strong
+ * moving overhead surface light (caustics + warm sun pools). No plane
+ * edges; pairs with the distant BackgroundField sheet.
  */
 
 const VERT = /* glsl */ `
@@ -23,7 +23,11 @@ const FRAG = /* glsl */ `
   uniform vec3 uDeepColor;
   uniform vec3 uMidColor;
   uniform vec3 uSurfaceTint;
+  uniform vec3 uWarmPeach;
+  uniform vec3 uAquaSheen;
   uniform float uShimmer;
+  uniform float uVaultCaustic;
+  uniform float uOverheadGlow;
   uniform vec3 uCameraPos;
 
   varying vec3 vWorldPos;
@@ -34,28 +38,92 @@ const FRAG = /* glsl */ `
     return fract(p.x * p.y);
   }
 
+  float noise2(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x),
+      mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x),
+      f.y
+    );
+  }
+
+  float fbm(vec2 p) {
+    float s = 0.0;
+    float a = 0.5;
+    vec2 p0 = p;
+    s += a * noise2(p0); a *= 0.52; p0 *= 2.02; p0 += vec2(0.0, 0.0);
+    s += a * noise2(p0); a *= 0.52; p0 *= 2.02; p0 += vec2(0.13, 0.07);
+    s += a * noise2(p0); a *= 0.52; p0 *= 2.02; p0 += vec2(0.26, 0.14);
+    s += a * noise2(p0); a *= 0.52; p0 *= 2.02; p0 += vec2(0.39, 0.21);
+    s += a * noise2(p0);
+    return s;
+  }
+
   void main() {
     vec3 dir = normalize(vWorldPos - uCameraPos);
     float up = dir.y;
 
-    float abyss = smoothstep(0.28, -0.78, up);
-    vec3 col = mix(uMidColor, uDeepColor, abyss);
+    float abyss = smoothstep(0.24, -0.88, up);
+    vec3 col = mix(uMidColor, uDeepColor, abyss * abyss * (3.0 - 2.0 * abyss));
 
-    float belt = smoothstep(-0.12, 0.18, up) * (1.0 - smoothstep(0.42, 0.88, up));
-    col = mix(col, uMidColor * 1.12, belt * 0.35);
+    // Horizon belt — very soft mid-water lift (avoid a crisp “band”).
+    float belt = smoothstep(-0.22, 0.28, up) * (1.0 - smoothstep(0.48, 0.94, up));
+    col = mix(col, uMidColor * 1.14, belt * 0.18);
 
-    float upper = smoothstep(0.08, 0.72, up);
-    vec2 shUv = vWorldPos.xz * 0.012 + uTime * vec2(0.018, 0.011);
-    float sh =
-      hash21(shUv) * 0.22
-      + hash21(shUv * 2.7 + 4.1) * 0.14
-      + sin(uTime * 0.35 + vWorldPos.x * 0.031 + vWorldPos.z * 0.027) * 0.04;
-    sh *= uShimmer;
+    // --- Overhead: soft refracted sunlight — low-frequency pools only (no
+    // screen-space sparkle). Wider cone so zenith reads as distant water.
+    float overhead = smoothstep(0.12, 0.72, up);
+    vec2 cBase = vWorldPos.xz * 0.014;
+    float t = uTime;
+    vec2 drift1 = vec2(0.022, 0.016) * t;
+    vec2 drift2 = vec2(-0.019, 0.021) * t * 0.55;
 
-    vec3 silver = vec3(0.92, 0.95, 1.0);
-    col += silver * sh * smoothstep(0.1, 0.55, up);
-    col += uSurfaceTint * pow(clamp(up, 0.0, 1.0), 1.8) * 0.42;
-    col += uSurfaceTint * smoothstep(0.35, 0.95, up) * 0.18;
+    float ca1 = fbm(cBase + drift1);
+    float ca2 = fbm(cBase * 1.85 - drift2 + vec2(4.2, 1.8));
+    float ca3 = fbm(cBase * 3.2 + drift1 * 1.1 + vec2(-12.0, 7.0));
+    float caustic =
+      pow(clamp(ca1 * 0.62 + ca2 * 0.28 + ca3 * 0.10, 0.0, 1.0), 1.05);
+    caustic *= uShimmer * uVaultCaustic * overhead;
+
+    vec3 caustCol = mix(uAquaSheen, uSurfaceTint, ca2 * 0.52);
+    caustCol = mix(caustCol, uWarmPeach, ca3 * 0.38);
+    col += caustCol * caustic * 1.05;
+
+    // Diagonal light rake — very soft, wide bands (no sharp glass stripes).
+    float rake =
+      sin(vWorldPos.x * 0.034 + vWorldPos.z * 0.027 + t * 0.34)
+      * sin(vWorldPos.x * -0.022 + vWorldPos.z * 0.044 + t * 0.24);
+    rake = pow(abs(rake) * 0.5 + 0.5, 2.15) * 0.22;
+    col += mix(uSurfaceTint, uWarmPeach, 0.35) * rake * overhead * uShimmer * uVaultCaustic * 0.45
+        * smoothstep(0.15, 0.68, up);
+
+    // Drifting veil — cloud-like breakup (fbm), replaces hash glitter.
+    float veil = fbm(cBase * 0.4 + drift2 * 0.35 + vec2(0.0, t * 0.018));
+    float veilW = smoothstep(0.28, 0.82, veil);
+    col += mix(uWarmPeach, uSurfaceTint, 0.45) * veilW * smoothstep(0.25, 0.88, up)
+        * uVaultCaustic * uShimmer * 0.14;
+
+    // Broad warm bloom looking up — soft sun pool.
+    float zenith = pow(clamp(up, 0.0, 1.0), 1.25);
+    col += uSurfaceTint * zenith * (0.42 + caustic * 0.32) * uOverheadGlow;
+    col += uWarmPeach * pow(zenith, 1.9) * 0.22 * uOverheadGlow;
+    col += uAquaSheen * smoothstep(0.35, 0.94, up) * (0.12 + rake * 0.22);
+
+    // --- Peripheral: infinite dark ocean — wrap light into depth without a hard “wall”.
+    float horiz = length(dir.xz);
+    float hDark = smoothstep(0.26, 1.12, horiz);
+    float below = smoothstep(0.2, -0.82, up);
+    float blendW = clamp(hDark * 0.44 + below * 0.4, 0.0, 1.0);
+    blendW = pow(blendW, 0.84);
+    vec3 farWater = mix(uDeepColor, uMidColor * vec3(0.52, 0.55, 0.62), 0.4);
+    farWater = mix(farWater, uDeepColor * vec3(0.55, 0.58, 0.64), 0.52);
+    col = mix(col, farWater, blendW * 0.55);
+
+    float forwardHaze =
+      smoothstep(-0.12, 0.48, -dir.z) * (1.0 - smoothstep(0.42, 0.94, up));
+    col = mix(col, uMidColor * vec3(0.94, 0.97, 1.04), forwardHaze * 0.09);
 
     gl_FragColor = vec4(col, 1.0);
   }
@@ -65,7 +133,11 @@ export default function SalmonOceanVault({
   deepColor = '#03060c',
   midColor = '#122a48',
   surfaceTint = '#f5ebff',
+  warmPeach = '#ffd8bc',
+  aquaSheen = '#c8f0ff',
   shimmer = 1,
+  vaultCaustic = 1,
+  overheadGlow = 1,
 }) {
   const meshRef = useRef();
   const { camera } = useThree();
@@ -76,10 +148,14 @@ export default function SalmonOceanVault({
       uDeepColor: { value: new THREE.Color(deepColor) },
       uMidColor: { value: new THREE.Color(midColor) },
       uSurfaceTint: { value: new THREE.Color(surfaceTint) },
+      uWarmPeach: { value: new THREE.Color(warmPeach) },
+      uAquaSheen: { value: new THREE.Color(aquaSheen) },
       uShimmer: { value: shimmer },
+      uVaultCaustic: { value: vaultCaustic },
+      uOverheadGlow: { value: overheadGlow },
       uCameraPos: { value: new THREE.Vector3() },
     }),
-    [deepColor, midColor, surfaceTint, shimmer],
+    [],
   );
 
   useFrame((s) => {
@@ -91,7 +167,11 @@ export default function SalmonOceanVault({
     u.uDeepColor.value.set(deepColor);
     u.uMidColor.value.set(midColor);
     u.uSurfaceTint.value.set(surfaceTint);
+    u.uWarmPeach.value.set(warmPeach);
+    u.uAquaSheen.value.set(aquaSheen);
     u.uShimmer.value = shimmer;
+    u.uVaultCaustic.value = vaultCaustic;
+    u.uOverheadGlow.value = overheadGlow;
     u.uCameraPos.value.copy(camera.position);
   });
 
@@ -102,14 +182,14 @@ export default function SalmonOceanVault({
       renderOrder={-50}
       raycast={() => null}
     >
-      <sphereGeometry args={[520, 48, 36]} />
+      <sphereGeometry args={[640, 60, 44]} />
       <shaderMaterial
         uniforms={uniforms}
         vertexShader={VERT}
         fragmentShader={FRAG}
         side={THREE.BackSide}
         depthWrite={false}
-        depthTest={true}
+        depthTest={false}
         fog={false}
         toneMapped={false}
       />

@@ -3,19 +3,25 @@ import { useFrame } from '@react-three/fiber';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
 import AmbientRadio from './AmbientRadio.jsx';
+import ErrorBoundary from './ErrorBoundary.jsx';
 import { resolveRadioSlotIndex } from '../theme/themes.js';
+import { computeLetterSlots, FLOAT_LAYOUT_DEFAULT } from './letterLayout.js';
+// Pass a real URL string so Troika fetches valid JSON in dev and
+// production (plain JSON module imports can stringify to "[object Object]"
+// in minified builds).
+import floatingLettersFontUrl from 'three/examples/fonts/droid/droid_sans_mono_regular.typeface.json?url';
+import { AQ_TYPO_DEBUG_LOG } from '../debug/aquariumRecovery.js';
+import {
+  typographyFillHex,
+  typographyHighlightColor,
+} from './typographyPalette.js';
 
-// Intel One Mono Regular, served as a static asset from /public.
-// troika-three-text only accepts .ttf (it rejects .woff/.woff2 at
-// runtime), so we decompress the @fontsource woff2 once at build
-// setup via scripts/woff2-to-ttf.mjs and check the resulting TTF
-// into /public/fonts/.
-const INTEL_ONE_MONO_URL = '/fonts/IntelOneMono-Regular.ttf';
+const FLOATING_LETTERS_FONT_URL = floatingLettersFontUrl;
 
 /**
  * `FloatingLetters`
  *
- * Eleven SDF-text glyphs spelling `abelcharrow`, scattered through
+ * Many SDF-text or canvas glyphs scattered through the aquarium
  * the aquarium volume as murky, sea-worn forms drifting in
  * currents -- closer to floating fabric scraps than to clean
  * floating text.
@@ -81,26 +87,32 @@ const INTEL_ONE_MONO_URL = '/fonts/IntelOneMono-Regular.ttf';
 
 // Default name -- used when no `text` prop is passed. Themes provide
 // their own copy (see src/theme/themes.js -> letters.text).
-const DEFAULT_NAME = 'abelcharrow';
+const DEFAULT_NAME = 'salmon days radio';
 
-// Faded off-white at murkiness=0. Not pure white; already slightly
-// blue-grey so a low-murkiness reading still feels underwater.
-const PEARL_COLOR = new THREE.Color('#dfe7ec');
-// Deep desaturated teal at murkiness=1. Picked so that letters at
-// max murkiness read as silhouette / rag-cloth rather than text.
-const DEEP_MURK = new THREE.Color('#1d2e38');
+/** Default per-letter layout: ordered Z arc + small jitter keeps L→R legible. */
+const DEFAULT_FLOAT_LAYOUT = { ...FLOAT_LAYOUT_DEFAULT };
 
 /** Default camera-distance readability (overridden per theme in themes.js). */
 const DEFAULT_TYPO_READABILITY = {
   anchor: [0, 0, 0],
-  readStart: 6.5,
-  readPeak: 12,
+  readStart: 5.0,
+  readPeak: 10.2,
   readEnd: 18,
-  readFadeStart: 24,
-  readFadeEnd: 32,
-  closeMul: 0.6,
-  peakMul: 1.12,
-  farMul: 0.86,
+  readFadeStart: 28,
+  readFadeEnd: 46,
+  /** Never dim opening view too aggressively; still feels murky when very close. */
+  closeMul: 0.78,
+  peakMul: 1.2,
+  /** Very far: gentle fade — letters stay on-screen for reading. */
+  farMul: 0.88,
+  /** past this camera→anchor dist, lift typography so it clears the hero fish a bit */
+  pullbackLiftStart: 6.2,
+  pullbackLiftEnd: 14.5,
+  pullbackLiftMax: 1.12,
+  /** subtle uniform scale as viewer backs off — phrase “gathers” in the frame */
+  pullbackScaleStart: 7.5,
+  pullbackScaleEnd: 16.5,
+  pullbackScaleExtra: 0.058,
 };
 
 const _anchorVec = new THREE.Vector3();
@@ -124,36 +136,70 @@ function typographyClarityFromCamera(camPos, cfg) {
     farMul,
   } = cfg;
 
+  let out;
   if (dist <= readStart) {
     const t = THREE.MathUtils.smoothstep(
       dist,
-      Math.max(0.5, readStart - 4.5),
+      Math.max(0.35, readStart - 3.8),
       readStart,
     );
-    return THREE.MathUtils.lerp(closeMul, peakMul * 0.93, t);
-  }
-  if (dist <= readPeak) {
+    out = THREE.MathUtils.lerp(closeMul, peakMul * 0.94, t);
+  } else if (dist <= readPeak) {
     const t = THREE.MathUtils.smoothstep(dist, readStart, readPeak);
-    return THREE.MathUtils.lerp(peakMul * 0.93, peakMul, t);
+    out = THREE.MathUtils.lerp(peakMul * 0.94, peakMul, t);
+  } else if (dist <= readEnd)
+    out = peakMul;
+  else if (dist <= readFadeStart) out = peakMul;
+  else if (dist >= readFadeEnd) out = farMul;
+  else {
+    const t = THREE.MathUtils.smoothstep(dist, readFadeStart, readFadeEnd);
+    out = THREE.MathUtils.lerp(peakMul, farMul, t);
   }
-  if (dist <= readEnd) return peakMul;
-  if (dist <= readFadeStart) return peakMul;
-  if (dist >= readFadeEnd) return farMul;
-  const t = THREE.MathUtils.smoothstep(dist, readFadeStart, readFadeEnd);
-  return THREE.MathUtils.lerp(peakMul, farMul, t);
+  return Math.max(0.74, out);
 }
 
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+/** Lift + slight scale as camera backs up — phrase clears fish and gathers in frame. */
+function TypographyResolveGroup({ typographyReadability, children }) {
+  const rootRef = useRef();
+  const cfgRef = useRef(typographyReadability);
+
+  useEffect(() => {
+    cfgRef.current = typographyReadability;
+  }, [typographyReadability]);
+
+  useFrame((s) => {
+    const g = rootRef.current;
+    if (!g) return;
+    const cfg = cfgRef.current;
+    const dist = s.camera.position.distanceTo(
+      _anchorVec.set(cfg.anchor[0], cfg.anchor[1], cfg.anchor[2]),
+    );
+    const liftT = THREE.MathUtils.smoothstep(
+      dist,
+      cfg.pullbackLiftStart,
+      cfg.pullbackLiftEnd,
+    );
+    g.position.y = liftT * (cfg.pullbackLiftMax ?? 0);
+
+    if (
+      cfg.pullbackScaleExtra != null &&
+      cfg.pullbackScaleStart != null &&
+      cfg.pullbackScaleEnd != null
+    ) {
+      const scT = THREE.MathUtils.smoothstep(
+        dist,
+        cfg.pullbackScaleStart,
+        cfg.pullbackScaleEnd,
+      );
+      const sMul = 1 + scT * cfg.pullbackScaleExtra;
+      g.scale.setScalar(sMul);
+    } else {
+      g.scale.setScalar(1);
+    }
+  });
+
+  return <group ref={rootRef}>{children}</group>;
 }
-const SEED = 24601;
 
 function Letter({
   char,
@@ -166,6 +212,7 @@ function Letter({
   floatStrength,
   shimmerStrength,
   color,
+  highlightColor,
   beam,
   typographyReadability,
 }) {
@@ -201,6 +248,8 @@ function Letter({
   useEffect(() => {
     if (textRef.current) handleSync(textRef.current);
   }, []);
+
+  const baseFillColor = useMemo(() => new THREE.Color(color), [color]);
 
   useFrame((s) => {
     const g = groupRef.current;
@@ -261,7 +310,11 @@ function Letter({
       Math.sin(t * 0.62 + phase) * 0.6 +
       Math.sin(t * 1.27 + phase * 2.3) * 0.25 +
       Math.sin(t * 2.05 + phase * 4.1) * 0.15;
-    let pulse = 1.0 + wobble * 0.16 * shimmerStrength;
+    const glintRare =
+      Math.pow(Math.max(0, Math.sin(t * 0.86 + phase * 2.45)), 16) * 0.92;
+    const sunCatch =
+      Math.pow(Math.max(0, Math.sin(t * 0.43 + phase * 1.08)), 5) * 0.4;
+    let pulse = 1.0 + wobble * 0.2 * shimmerStrength + glintRare * 0.22;
 
     // === Beam proximity ===
     let inBeam = 0;
@@ -305,14 +358,37 @@ function Letter({
     );
     pulse *= clarityMul;
 
-    txt.fillOpacity = THREE.MathUtils.clamp(opacity * pulse, 0, 1);
+    const mat = txt.material;
+    if (mat && mat.color && highlightColor) {
+      const sh = shimmerStrength;
+      mat.color
+        .copy(baseFillColor)
+        .lerp(
+          highlightColor,
+          Math.min(
+            1,
+            0.14 +
+              (0.5 + 0.5 * wobble) * 0.16 * sh +
+              glintRare * 1.05 +
+              sunCatch * sh * 0.85 +
+              inBeam * 0.12,
+          ),
+        );
+    }
+
+    txt.fillOpacity = THREE.MathUtils.clamp(
+      opacity * pulse * (1 + sunCatch * 0.12 * shimmerStrength),
+      0.2,
+      1,
+    );
   });
 
   return (
     <group ref={groupRef} position={[baseX, baseY, baseZ]}>
       <Text
         ref={textRef}
-        font={INTEL_ONE_MONO_URL}
+        font={FLOATING_LETTERS_FONT_URL}
+        characters={char}
         fontSize={scale}
         color={color}
         fillOpacity={opacity}
@@ -329,8 +405,10 @@ function Letter({
 /** Drift + beam / haze language matches `Letter`, gentler so the beacon stays findable. */
 const ORB_FLOAT_SCALE = 0.52;
 const ORB_ROT_SCALE = 0.42;
+/** Slightly under 1 keeps the embedded orb discoverable vs glyph cap-height. */
+const ORB_VISUAL_SCALE_MUL = 0.94;
 
-function LetterRadioSlot({
+export function LetterRadioSlot({
   baseX,
   baseY,
   baseZ,
@@ -409,7 +487,9 @@ function LetterRadioSlot({
       Math.sin(t * 0.62 + phase) * 0.6 +
       Math.sin(t * 1.27 + phase * 2.3) * 0.25 +
       Math.sin(t * 2.05 + phase * 4.1) * 0.15;
-    let pulse = 1.0 + wobble * 0.16 * shimmerStrength;
+    const glintRare =
+      Math.pow(Math.max(0, Math.sin(t * 0.9 + phase * 2.2)), 14) * 0.85;
+    let pulse = 1.0 + wobble * 0.18 * shimmerStrength + glintRare * 0.18;
 
     let inBeam = 0;
     if (beam && beam.enabled) {
@@ -453,24 +533,26 @@ function LetterRadioSlot({
     const hazeMin = beaconAtmosphere?.hazeModFloor ?? 0.22;
     modRef.current = {
       beam: 1 + inBeam * 0.5,
-      haze: THREE.MathUtils.clamp(pulse * 0.92, hazeMin, 1.25),
-      shimmer: 1 + wobble * 0.11 * shimmerStrength,
+      haze: THREE.MathUtils.clamp(pulse * 0.94, hazeMin, 1.28),
+      shimmer: 1 + wobble * 0.13 * shimmerStrength + glintRare * 0.35,
     };
   });
 
-  const typoScale = scale / 0.3;
+  const typoScale = (scale / 0.3) * ORB_VISUAL_SCALE_MUL;
 
   return (
     <group ref={groupRef} position={[baseX, baseY, baseZ]}>
-      <AmbientRadio
-        embedded
-        modRef={modRef}
-        typographyScale={typoScale}
-        murkTint={murkTint}
-        glowIntensity={glowIntensity}
-        beaconAtmosphere={beaconAtmosphere}
-        enabled
-      />
+      <ErrorBoundary name="FloatingLetters.AmbientRadio.embedded" fallback={null}>
+        <AmbientRadio
+          embedded
+          modRef={modRef}
+          typographyScale={typoScale}
+          murkTint={murkTint}
+          glowIntensity={glowIntensity}
+          beaconAtmosphere={beaconAtmosphere}
+          enabled
+        />
+      </ErrorBoundary>
     </group>
   );
 }
@@ -519,9 +601,23 @@ export default function FloatingLetters({
   radioGlowIntensity = 1,
   /** Swamp Molly: `theme.radio.beaconAtmosphere` for submerged beacon presence. */
   beaconAtmosphere = null,
+  /** Theme tuning for scatter vs readability (see `DEFAULT_FLOAT_LAYOUT`). */
+  floatLayout: floatLayoutProp,
   /** Merged theme defaults + `letters.typographyReadability` for camera-distance legibility. */
   typographyReadability: typographyReadabilityProp,
+  /** Theme-driven pale silver / pearl / aqua mix (see themes.js). */
+  typographyTint: typographyTintProp = null,
+  /** Recovery: clamp each glyph |baseZ| so the phrase stays in the frustum. */
+  safeClampZ = null,
 }) {
+  const mergedFloatLayout = useMemo(
+    () => ({
+      ...DEFAULT_FLOAT_LAYOUT,
+      ...(floatLayoutProp ?? {}),
+    }),
+    [floatLayoutProp],
+  );
+
   const typographyReadability = useMemo(
     () => ({
       ...DEFAULT_TYPO_READABILITY,
@@ -529,106 +625,74 @@ export default function FloatingLetters({
     }),
     [typographyReadabilityProp],
   );
-  // Derive a single tinted color from PEARL_COLOR / DEEP_MURK and
-  // pass it down to each Letter. Memoised on `murkiness` so the
-  // lerp only runs when the slider changes.
-  const tintedColor = useMemo(() => {
-    const c = PEARL_COLOR.clone().lerp(
-      DEEP_MURK,
-      THREE.MathUtils.clamp(murkiness, 0, 1),
-    );
-    return `#${c.getHexString()}`;
-  }, [murkiness]);
+  const tintedColor = useMemo(
+    () => typographyFillHex(murkiness, typographyTintProp),
+    [murkiness, typographyTintProp],
+  );
+  const highlightColor = useMemo(
+    () => typographyHighlightColor(typographyTintProp),
+    [typographyTintProp],
+  );
 
   const radioSlotIndex = useMemo(
     () => resolveRadioSlotIndex(text, radioSlot),
     [text, radioSlot],
   );
 
-  const layout = useMemo(() => {
-    const rnd = mulberry32(SEED);
-
-    if (!text.includes('\n')) {
-      const letters = text.split('');
-      const total = letters.length;
-      return letters.map((ch, i) => {
-        const xJitter =
-          (rnd() - 0.5) * spacing * 0.35 * lineXJitterMul;
-        const yJitter =
-          (rnd() - 0.5) *
-          spacing *
-          1.6 *
-          intraLineYJitterMul;
-        const zJitter = (rnd() - 0.6) * depthSpread;
-        return {
-          char: ch,
-          baseX: (i - (total - 1) / 2) * spacing + xJitter,
-          baseY: yJitter,
-          baseZ: zJitter,
-          phase: rnd() * Math.PI * 2,
-        };
-      });
+  const layoutOpts = useMemo(() => {
+    if (safeClampZ != null && Number.isFinite(safeClampZ)) {
+      return { maxAbsZ: safeClampZ };
     }
+    return undefined;
+  }, [safeClampZ]);
 
-    const lines = text.split('\n');
-    const rowGap = spacing * rowGapMul;
-    const slots = [];
+  const layout = useMemo(
+    () =>
+      computeLetterSlots(
+        text,
+        spacing,
+        depthSpread,
+        rowGapMul,
+        intraLineYJitterMul,
+        interRowJitterMul,
+        lineXJitterMul,
+        mergedFloatLayout,
+        layoutOpts,
+      ),
+    [
+      spacing,
+      depthSpread,
+      text,
+      rowGapMul,
+      intraLineYJitterMul,
+      interRowJitterMul,
+      lineXJitterMul,
+      mergedFloatLayout,
+      layoutOpts,
+    ],
+  );
 
-    lines.forEach((lineStr, lineIdx) => {
-      const chars = [...lineStr];
-      const n = chars.length;
-      const rowBase =
-        lines.length > 1
-          ? (lines.length - 1) / 2 - lineIdx
-          : 0;
-      const rowY =
-        rowBase * rowGap +
-        (rnd() - 0.5) * spacing * interRowJitterMul;
-
-      chars.forEach((ch, j) => {
-        const xJitter =
-          (rnd() - 0.5) * spacing * 0.35 * lineXJitterMul;
-        const yJitter =
-          (rnd() - 0.5) *
-          spacing *
-          1.45 *
-          intraLineYJitterMul;
-        const zJitter = (rnd() - 0.6) * depthSpread;
-        slots.push({
-          char: ch,
-          baseX: (j - (n - 1) / 2) * spacing + xJitter,
-          baseY: rowY + yJitter,
-          baseZ: zJitter,
-          phase: rnd() * Math.PI * 2,
-        });
-      });
-
-      if (lineIdx < lines.length - 1) {
-        slots.push({
-          char: '\n',
-          baseX: 0,
-          baseY: 0,
-          baseZ: 0,
-          phase: 0,
-        });
-      }
+  useEffect(() => {
+    if (!AQ_TYPO_DEBUG_LOG) return;
+    const glyphs = layout.filter((s) => !/\s/.test(s.char)).length;
+    const samples = layout
+      .filter((s) => !/\s/.test(s.char))
+      .slice(0, 6)
+      .map(({ baseX, baseY, baseZ }) => ({ x: baseX, y: baseY, z: baseZ }));
+    console.info('[aquarium] FloatingLetters mounted (Troika)', {
+      phrase: text,
+      charCount: text.length,
+      slotCount: layout.length,
+      glyphs,
+      radioSlotIndex,
+      positionSamples: samples,
     });
-
-    return slots;
-  }, [
-    spacing,
-    depthSpread,
-    text,
-    rowGapMul,
-    intraLineYJitterMul,
-    interRowJitterMul,
-    lineXJitterMul,
-  ]);
+  }, [text, layout, radioSlotIndex]);
 
   if (!enabled) return null;
 
   return (
-    <group>
+    <TypographyResolveGroup typographyReadability={typographyReadability}>
       {layout.map((l, i) => {
         if (/\s/.test(l.char)) return null;
 
@@ -671,11 +735,12 @@ export default function FloatingLetters({
             floatStrength={floatStrength}
             shimmerStrength={shimmerStrength}
             color={tintedColor}
+            highlightColor={highlightColor}
             beam={beam}
             typographyReadability={typographyReadability}
           />
         );
       })}
-    </group>
+    </TypographyResolveGroup>
   );
 }
