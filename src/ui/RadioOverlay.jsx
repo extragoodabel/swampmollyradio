@@ -17,7 +17,6 @@ import { useRadio } from '../audio/RadioContext.jsx';
 export default function RadioOverlay() {
   const {
     station,
-    activeStationIndex,
     dialStationCount,
     isPlaying,
     isLoading,
@@ -42,46 +41,53 @@ export default function RadioOverlay() {
   const showStationNav =
     mounted && !showError && dialStationCount > 0 && (showActive || showPaused);
 
-  const stationBlock = (
-    <>
-      <div className="radio-overlay__brand">SomaFM</div>
-      <div className="radio-overlay__station">{station.name}</div>
-      <div className="radio-overlay__dial">
-        {activeStationIndex + 1} / {dialStationCount}
-      </div>
-    </>
+  const navPrev = (
+    <button
+      type="button"
+      className="radio-overlay__navGlyph"
+      aria-label="Previous station"
+      onClick={() => previousStation()}
+    >
+      &lt;
+    </button>
   );
+
+  const navNext = (
+    <button
+      type="button"
+      className="radio-overlay__navGlyph"
+      aria-label="Next station"
+      onClick={() => nextStation()}
+    >
+      &gt;
+    </button>
+  );
+
+  const stationLine = (
+    <div className="radio-overlay__station">{station.name}</div>
+  );
+
+  const tuneRow =
+    showStationNav ? (
+      <div className="radio-overlay__tuneRow">
+        {navPrev}
+        {stationLine}
+        {navNext}
+      </div>
+    ) : (
+      <div className="radio-overlay__tuneRow radio-overlay__tuneRow--solo">
+        {stationLine}
+      </div>
+    );
 
   return (
     <div className={`radio-overlay ${visible ? 'radio-overlay--visible' : ''}`}>
       {showActive && (
         <>
-          <div className="radio-overlay__state">
-            {isLoading ? 'Tuning in' : 'Now playing'}
+          <div className="radio-overlay__meta">
+            {isLoading ? 'tuning in - somafm' : 'now playing - somafm'}
           </div>
-          {showStationNav ? (
-            <div className="radio-overlay__stationRow">
-              <button
-                type="button"
-                className="radio-overlay__navGlyph"
-                aria-label="Previous station"
-                onClick={() => previousStation()}
-              >
-                &lt;
-              </button>
-              <div className="radio-overlay__stationCol">{stationBlock}</div>
-              <button
-                type="button"
-                className="radio-overlay__navGlyph"
-                aria-label="Next station"
-                onClick={() => nextStation()}
-              >
-                &gt;
-              </button>
-            </div>
-          ) : (
-            <div className="radio-overlay__stationCol">{stationBlock}</div>
-          )}
+          {tuneRow}
           {nowPlaying?.title && (
             <div className="radio-overlay__track">{nowPlaying.title}</div>
           )}
@@ -94,33 +100,12 @@ export default function RadioOverlay() {
       )}
       {showPaused && !showError && (
         <>
-          {showStationNav ? (
-            <div className="radio-overlay__stationRow">
-              <button
-                type="button"
-                className="radio-overlay__navGlyph"
-                aria-label="Previous station"
-                onClick={() => previousStation()}
-              >
-                &lt;
-              </button>
-              <div className="radio-overlay__stationCol">{stationBlock}</div>
-              <button
-                type="button"
-                className="radio-overlay__navGlyph"
-                aria-label="Next station"
-                onClick={() => nextStation()}
-              >
-                &gt;
-              </button>
-            </div>
-          ) : (
-            <div className="radio-overlay__stationCol">{stationBlock}</div>
-          )}
+          <div className="radio-overlay__meta">paused - somafm</div>
+          {tuneRow}
+          <div className="radio-overlay__track radio-overlay__track--soft">
+            Paused
+          </div>
         </>
-      )}
-      {showPaused && !showError && (
-        <div className="radio-overlay__hint">Paused</div>
       )}
       {showError && (
         <div className="radio-overlay__hint radio-overlay__hint--error">

@@ -1,5 +1,5 @@
 import { useThree } from '@react-three/fiber';
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useControls, folder, button } from 'leva';
 import * as THREE from 'three';
 import CameraRig from './CameraRig.jsx';
@@ -24,7 +24,15 @@ import SwampSunkenFiatPanda from './SwampSunkenFiatPanda.jsx';
 import SwampMollyPoem, {
   SwampFloatingWaterWords,
 } from './SwampMollyPoem.jsx';
-import SwampPoemRevealArrowCue from './SwampPoemRevealArrowCue.jsx';
+import SwampHacklesHtmlPanel from './SwampHacklesHtmlPanel.jsx';
+import { rustyCarInteractRef } from './rustyCarClickBridge.js';
+import {
+  HACKLES_SIGN_REVEAL_DELAY_MS,
+  hacklesSignEulerRadTowardCenter,
+  poemGroupEulerRadTowardCenter,
+  swampHacklesSignWorldPosition,
+  swampPoemWorldPositionFromRustyCar,
+} from './swampPoemPlacement.js';
 import SalmonWhaleSkeleton from './SalmonWhaleSkeleton.jsx';
 import LightBeam from './LightBeam.jsx';
 import AmbientRadio from './AmbientRadio.jsx';
@@ -48,6 +56,8 @@ import { buildSwampSceneGates } from '../theme/swampRecovery.js';
 import { STUDIO_CREDIT_LINE_RAW } from '../content/studioCreditLine.js';
 import AquariumEngineDebug from '../debug/AquariumEngineDebug.jsx';
 import {
+  AQ_CAR_DEBUG,
+  AQ_CAR_INFO_DEBUG,
   AQ_DEBUG,
   AQ_ENGINE_HUD,
   AQ_LITE_ATMOSPHERE,
@@ -119,17 +129,114 @@ export default function Scene() {
     [themeId],
   );
   const swampGates = useMemo(() => buildSwampSceneGates(themeId), [themeId]);
-  const [swampPoemOpen, setSwampPoemOpen] = useState(false);
+  const [swampPoemPresent, setSwampPoemPresent] = useState(true);
   const [swampFiatCreditOpen, setSwampFiatCreditOpen] = useState(false);
-  const [swampPoemArrowCue, setSwampPoemArrowCue] = useState(false);
+  const [swampHacklesUi, setSwampHacklesUi] = useState(
+    /** @type {'hidden' | 'waiting' | 'shown' | 'hiding'} */ ('hidden'),
+  );
+  const hacklesRevealTimerRef = useRef(0);
+  const lastRustyHacklesClickMsRef = useRef(0);
 
   useEffect(() => {
     if (themeId !== 'swamp') {
-      setSwampPoemOpen(false);
       setSwampFiatCreditOpen(false);
-      setSwampPoemArrowCue(false);
+      setSwampHacklesUi('hidden');
+      if (hacklesRevealTimerRef.current) {
+        window.clearTimeout(hacklesRevealTimerRef.current);
+        hacklesRevealTimerRef.current = 0;
+      }
     }
   }, [themeId]);
+
+  useEffect(() => {
+    if (!AQ_CAR_INFO_DEBUG && !AQ_CAR_DEBUG) return;
+    console.info('[aqcarinfodebug] swampHacklesUi state', {
+      swampHacklesUi,
+      hacklesPanelMounted:
+        swampHacklesUi === 'shown' || swampHacklesUi === 'hiding',
+    });
+  }, [swampHacklesUi]);
+
+  useEffect(
+    () => () => {
+      if (hacklesRevealTimerRef.current) {
+        window.clearTimeout(hacklesRevealTimerRef.current);
+        hacklesRevealTimerRef.current = 0;
+      }
+    },
+    [],
+  );
+
+  const onHacklesFadeOutComplete = useCallback(() => {
+    setSwampHacklesUi('hidden');
+  }, []);
+
+  const onRustyCarHacklesToggle = useCallback(() => {
+    const nowMs = performance.now();
+    if (nowMs - lastRustyHacklesClickMsRef.current < 250) {
+      if (AQ_CAR_INFO_DEBUG || AQ_CAR_DEBUG) {
+        console.info('[aqcarinfodebug] rusty car click ignored (debounce 250ms)');
+      }
+      return;
+    }
+    lastRustyHacklesClickMsRef.current = nowMs;
+
+    setSwampHacklesUi((prev) => {
+      if (AQ_CAR_INFO_DEBUG || AQ_CAR_DEBUG) {
+        console.info('[aqcarinfodebug] rusty car click received', {
+          prevSwampHacklesUi: prev,
+        });
+      }
+      if (prev === 'waiting') {
+        return prev;
+      }
+      if (prev === 'hiding') {
+        return prev;
+      }
+      if (prev === 'shown') {
+        if (hacklesRevealTimerRef.current) {
+          window.clearTimeout(hacklesRevealTimerRef.current);
+          hacklesRevealTimerRef.current = 0;
+        }
+        if (AQ_CAR_INFO_DEBUG || AQ_CAR_DEBUG) {
+          console.info('[aqcarinfodebug] hackles state: shown → hiding (fade out)');
+        }
+        return 'hiding';
+      }
+
+      if (hacklesRevealTimerRef.current) {
+        window.clearTimeout(hacklesRevealTimerRef.current);
+        hacklesRevealTimerRef.current = 0;
+      }
+      hacklesRevealTimerRef.current = window.setTimeout(() => {
+        hacklesRevealTimerRef.current = 0;
+        setSwampHacklesUi((p) => {
+          const next = p === 'waiting' ? 'shown' : p;
+          if (AQ_CAR_INFO_DEBUG || AQ_CAR_DEBUG) {
+            console.info('[aqcarinfodebug] hackles reveal timer completed', {
+              prior: p,
+              next,
+            });
+          }
+          return next;
+        });
+      }, HACKLES_SIGN_REVEAL_DELAY_MS);
+      if (AQ_CAR_INFO_DEBUG || AQ_CAR_DEBUG) {
+        console.info('[aqcarinfodebug] hackles reveal timer started', {
+          delayMs: HACKLES_SIGN_REVEAL_DELAY_MS,
+          nextStateAfterSchedule: 'waiting',
+        });
+      }
+      return 'waiting';
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    rustyCarInteractRef.toggleHackles = onRustyCarHacklesToggle;
+    return () => {
+      rustyCarInteractRef.toggleHackles = null;
+    };
+  }, [onRustyCarHacklesToggle]);
 
   useEffect(() => {
     if (themeId !== 'salmonDaysRadio' || salmonRestoreStep < 13) return;
@@ -1478,15 +1585,25 @@ export default function Scene() {
     ...(atm?.seabed ?? {}),
   };
 
-  const swampPoemWorldPosition = useMemo(() => {
-    const floorY = -seabedProps.depth + 0.22;
-    return [-3.15, floorY + 2.55, 68.4];
-  }, [seabedProps.depth]);
+  const swampPoemWorldPosition = useMemo(
+    () => swampPoemWorldPositionFromRustyCar(seabedProps.depth),
+    [seabedProps.depth],
+  );
 
-  const swampPoemCueFrom = useMemo(() => {
-    const floorY = -seabedProps.depth + 0.22;
-    return [-4.45, floorY + 1.35, 71];
-  }, [seabedProps.depth]);
+  const swampPoemRotation = useMemo(
+    () => poemGroupEulerRadTowardCenter(seabedProps.depth),
+    [seabedProps.depth],
+  );
+
+  const swampHacklesSignPosition = useMemo(
+    () => swampHacklesSignWorldPosition(seabedProps.depth),
+    [seabedProps.depth],
+  );
+
+  const swampHacklesSignRotation = useMemo(
+    () => hacklesSignEulerRadTowardCenter(seabedProps.depth),
+    [seabedProps.depth],
+  );
 
   const swampFiatCreditWorldPosition = useMemo(() => {
     const floorY = -seabedProps.depth + 0.22;
@@ -1777,33 +1894,39 @@ export default function Scene() {
             fogNear={volumeFogNear}
             fogFar={volumeFogFar}
             fogColor={fogColor}
-            poemInteractable={swampGates.poem}
-            onVintagePoemOpenRequest={() => {
-              setSwampPoemOpen(true);
-              setSwampPoemArrowCue(true);
-            }}
+            infoBubbleInteractable={swampGates.car1}
+            onRustyCarHacklesToggle={onRustyCarHacklesToggle}
           />
         </ErrorBoundary>
       )}
       {themeId === 'swamp' &&
         !AQ_SCENE_MINIMAL &&
+        swampGates.car1 &&
+        (swampHacklesUi === 'shown' || swampHacklesUi === 'hiding') && (
+        <ErrorBoundary fallback={null}>
+          <Suspense fallback={null}>
+            <SwampHacklesHtmlPanel
+              position={swampHacklesSignPosition}
+              rotation={swampHacklesSignRotation}
+              open={swampHacklesUi === 'shown'}
+              onFadeOutComplete={onHacklesFadeOutComplete}
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
+      {themeId === 'swamp' &&
+        !AQ_SCENE_MINIMAL &&
         swampGates.poem &&
-        swampPoemOpen && (
+        swampPoemPresent && (
         <ErrorBoundary fallback={null}>
           <SwampMollyPoem
             position={swampPoemWorldPosition}
+            rotation={swampPoemRotation}
             murkiness={poemMurkiness}
             typographyTint={theme.letters.typographyTint ?? null}
-            onDissipated={() => setSwampPoemOpen(false)}
+            onDissipated={() => setSwampPoemPresent(false)}
           />
         </ErrorBoundary>
-      )}
-      {themeId === 'swamp' && swampPoemArrowCue && (
-        <SwampPoemRevealArrowCue
-          from={swampPoemCueFrom}
-          to={swampPoemWorldPosition}
-          onComplete={() => setSwampPoemArrowCue(false)}
-        />
       )}
       {themeId === 'swamp' && !AQ_SCENE_MINIMAL && swampGates.car2 && (
         <ErrorBoundary fallback={null}>
@@ -1832,6 +1955,7 @@ export default function Scene() {
             scale={2}
             floatStrength={0.008}
             volumeDepth={3.2}
+            introFadeInSec={0.55}
             onDissipated={() => setSwampFiatCreditOpen(false)}
           />
         </ErrorBoundary>

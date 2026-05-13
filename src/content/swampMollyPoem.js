@@ -4,13 +4,13 @@
  */
 
 export const SWAMP_MOLLY_POEM_RAW = `Swamp Molly
-Makayla Gay, Hackles
+Makayla Danielle Gay
 
 I sat with a boy by the lake
 who put his hand on my knee to tell me what 
 the JV soccer team knew
 about Swamp Molly,
-a tangled mass of every thing/one found at the bottom of the lake
+a tangled mass of every thing one found at the bottom of the lake
 who drifts from cove to cove, shrieking.
 
 I got up
@@ -73,5 +73,4 @@ sweet
 sink 
 
 	rot. 
-
-Girl Noise Press (c) 2025`;
+`;

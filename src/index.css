@@ -198,6 +198,9 @@ canvas:active {
   z-index: 11;
   pointer-events: none;
   font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   max-width: 280px;
   opacity: 0;
   transform: translateY(-4px);
@@ -210,54 +213,51 @@ canvas:active {
   transform: translateY(0);
 }
 
-.radio-overlay__state {
-  font-size: 9px;
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
-  color: rgba(160, 210, 225, 0.55);
-}
-
-.radio-overlay__stationRow {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin-top: 4px;
+/* Line 1 — not clickable; SomaFM tied to service readout, not station row */
+.radio-overlay__meta {
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  text-transform: lowercase;
+  color: rgba(155, 205, 220, 0.5);
   pointer-events: none;
 }
 
-.radio-overlay__stationCol .radio-overlay__brand {
-  margin-top: 0;
-}
-
-.radio-overlay__brand {
-  font-size: 8px;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  color: rgba(145, 200, 218, 0.45);
+/*
+ * Line 2 — chevrons + station only. inline-flex + intrinsic width so prev/next
+ * spacing follows the station name, not the (possibly wider) song title below.
+ */
+.radio-overlay__tuneRow {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  pointer-events: none;
+  max-width: 100%;
 }
 
 .radio-overlay__station {
-  margin-top: 6px;
+  flex: 0 1 auto;
+  margin-top: 0;
+  min-width: 0;
   font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
+  text-align: center;
   color: rgba(220, 240, 250, 0.92);
-}
-
-.radio-overlay__dial {
-  margin-top: 5px;
-  font-size: 9px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: rgba(150, 198, 215, 0.45);
+  overflow-wrap: anywhere;
 }
 
 .radio-overlay__track {
-  margin-top: 8px;
+  align-self: stretch;
+  min-width: 0;
+  margin-top: 7px;
   font-size: 11px;
   letter-spacing: 0.04em;
   color: rgba(180, 215, 230, 0.78);
   line-height: 1.45;
+  overflow-wrap: break-word;
+  pointer-events: none;
 }
 
 .radio-overlay__track--soft {
@@ -265,18 +265,11 @@ canvas:active {
   font-style: italic;
 }
 
-.radio-overlay__stationCol {
-  flex: 1;
-  min-width: 0;
-}
-
 .radio-overlay__navGlyph {
   pointer-events: auto;
   flex-shrink: 0;
-  align-self: flex-start;
   margin: 0;
-  padding: 0 2px;
-  margin-top: 1px;
+  padding: 0 1px;
   font: inherit;
   font-size: 11px;
   line-height: 1.2;
@@ -301,6 +294,84 @@ canvas:active {
 
 .radio-overlay__hint--error {
   color: rgba(245, 175, 175, 0.7);
+}
+
+/* Girl Noise Press — drei Html panel; world-anchored near rusty car */
+.swamp-hackles-html__wrap {
+  pointer-events: auto;
+  margin: 0;
+  padding: 0;
+  filter: none;
+  max-width: min(280px, 38vw);
+  opacity: 0;
+  transition: opacity 0.48s ease;
+}
+
+.swamp-hackles-html__wrap--open {
+  opacity: 1;
+}
+
+.swamp-hackles-html__wrap--closed {
+  opacity: 0;
+}
+
+.swamp-hackles-html__blocklink {
+  display: block;
+  margin: 0;
+  padding: 0;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.swamp-hackles-html__line {
+  margin: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.45;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow:
+    0 0 12px rgba(10, 24, 28, 0.95),
+    0 0 2px rgba(0, 0, 0, 0.9);
+  color: rgba(210, 235, 245, 0.88);
+  font-style: normal;
+  font-weight: 500;
+}
+
+.swamp-hackles-html__line--title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  margin-bottom: 5px;
+}
+
+.swamp-hackles-html__line--title em {
+  font-style: italic;
+  font-weight: 600;
+  color: rgba(225, 246, 255, 0.95);
+}
+
+.swamp-hackles-html__line--body {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: rgba(175, 218, 230, 0.78);
+}
+
+.swamp-hackles-html__line--cta {
+  margin-top: 6px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+
+.swamp-hackles-html__cta {
+  color: rgba(185, 245, 255, 0.95);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.swamp-hackles-html__blocklink:hover .swamp-hackles-html__cta {
+  color: rgba(230, 255, 255, 1);
 }
 
 /* Portal link to the other aquarium — lives in .overlay__bottom grid. */

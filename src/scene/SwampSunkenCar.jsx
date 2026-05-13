@@ -2,7 +2,7 @@ import { Suspense, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF, useCursor } from '@react-three/drei';
 import * as THREE from 'three';
-import { AQ_CAR_DEBUG } from '../debug/aquariumRecovery.js';
+import { AQ_CAR_DEBUG, AQ_CAR_INFO_DEBUG } from '../debug/aquariumRecovery.js';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import SubmergedHeadlights, {
   SWAMP_HEADLIGHT_TUNING_VINTAGE,
@@ -11,6 +11,15 @@ import {
   collectHeadlightAnchors,
   dimSwampMaterials,
 } from './swampSubmergedGlbUtils.js';
+
+import { rustyCarInteractRef } from './rustyCarClickBridge.js';
+
+/** Warm gold/amber — visible through murk (emissive + additive halo). */
+export const CAR_CLICK_GLOW_COLOR = new THREE.Color('#f2b84a');
+/** ~1.0–1.5s pulse window */
+export const RUSTY_CAR_PULSE_SEC = 1.28;
+/** Stronger than legacy 2×; multiplied into emissive + halo */
+export const RUSTY_CAR_CLICK_PULSE_INTENSITY = 5.2;
 
 /**
  * Distant submerged car — Swamp Molly only. `rusty_vintage_car.glb` + murk;
@@ -45,18 +54,46 @@ function SwampSunkenCarLoaded({
   fogFar,
   fogColor,
   headlightsEnabled = true,
-  poemInteractable = false,
-  onVintagePoemOpenRequest,
+  infoBubbleInteractable = false,
+  onRustyCarHacklesToggle,
 }) {
   const { scene } = useGLTF(RUSTY_VINTAGE_CAR_URL);
   const [carRoot, setCarRoot] = useState(null);
   const [anchors, setAnchors] = useState([]);
-  const [poemHitHover, setPoemHitHover] = useState(false);
+  const [infoHitHover, setInfoHitHover] = useState(false);
   const frameRef = useRef(null);
   const logAcc = useRef(0);
+  const carRootRef = useRef(null);
+  const materialPulseBaseRef = useRef(/** @type {Map<THREE.Material, { color?: THREE.Color; emissive?: THREE.Color; emissiveIntensity: number }>} */ (new Map()));
+  const pulseRemainRef = useRef(0);
+  const pulseDistBoostRef = useRef(1);
   const { camera } = useThree();
 
-  useCursor(poemInteractable && poemHitHover);
+  useCursor(infoBubbleInteractable && infoHitHover);
+
+  const computePulseDistBoost = useMemo(
+    () => () => {
+      const fr = frameRef.current;
+      if (!fr) return 1;
+      fr.updateMatrixWorld(true);
+      const c = new THREE.Box3()
+        .setFromObject(fr)
+        .getCenter(new THREE.Vector3());
+      const d = camera.position.distanceTo(c);
+      return THREE.MathUtils.clamp(d / 13, 1, 4.75);
+    },
+    [camera],
+  );
+
+  useLayoutEffect(() => {
+    rustyCarInteractRef.pulse = () => {
+      pulseDistBoostRef.current = computePulseDistBoost();
+      pulseRemainRef.current = RUSTY_CAR_PULSE_SEC;
+    };
+    return () => {
+      rustyCarInteractRef.pulse = null;
+    };
+  }, [computePulseDistBoost]);
 
   useLayoutEffect(() => {
     const fogMurk = new THREE.Color('#151210');
@@ -86,14 +123,70 @@ function SwampSunkenCarLoaded({
     root.traverse((o) => {
       if (o.isMesh) o.raycast = () => {};
     });
+    carRootRef.current = root;
     setCarRoot(root);
   }, [scene]);
+
+  useLayoutEffect(() => {
+    const root = carRootRef.current ?? carRoot;
+    if (!root) return;
+    const map = new Map();
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (!m || map.has(m)) continue;
+        const snap = {
+          emissiveIntensity:
+            m.emissiveIntensity !== undefined ? m.emissiveIntensity : 0,
+        };
+        if (m.emissive) snap.emissive = m.emissive.clone();
+        if (m.color) snap.color = m.color.clone();
+        map.set(m, snap);
+      }
+    });
+    materialPulseBaseRef.current = map;
+  }, [carRoot]);
 
   const floorY = seabedY + 0.22;
   const groupPos = [-4.45, floorY - 0.86, 71];
   const adjustedAnchors = useMemo(() => applyAnchorOffsets(anchors), [anchors]);
 
   useFrame((_, delta) => {
+    const root = carRootRef.current ?? carRoot;
+    const baseMap = materialPulseBaseRef.current;
+
+    if (root && baseMap?.size) {
+      if (pulseRemainRef.current > 0) {
+        pulseRemainRef.current = Math.max(
+          0,
+          pulseRemainRef.current - delta,
+        );
+      }
+      const u =
+        pulseRemainRef.current <= 0
+          ? 0
+          : 1 - pulseRemainRef.current / RUSTY_CAR_PULSE_SEC;
+      const hump = Math.sin(Math.min(1, u) * Math.PI);
+      const db = pulseDistBoostRef.current;
+
+      root.traverse((o) => {
+        if (!o.isMesh) return;
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) {
+          const b = baseMap.get(m);
+          if (!b || !m) continue;
+          const w = hump * 0.48 * RUSTY_CAR_CLICK_PULSE_INTENSITY * db;
+          if (b.emissive && m.emissive) {
+            m.emissive.copy(b.emissive).lerp(CAR_CLICK_GLOW_COLOR, Math.min(1, w * 0.38));
+            m.emissiveIntensity = b.emissiveIntensity + w * 1.12;
+          } else if (b.color && m.color) {
+            m.color.copy(b.color).lerp(CAR_CLICK_GLOW_COLOR, w * 0.16);
+          }
+        }
+      });
+    }
+
     if (!AQ_CAR_DEBUG || !frameRef.current) return;
     logAcc.current += delta;
     if (logAcc.current < 0.9) return;
@@ -120,17 +213,29 @@ function SwampSunkenCarLoaded({
     <group position={groupPos} rotation={[0, Math.PI, 0]}>
       <group ref={frameRef} scale={1.05}>
         {carRoot && <primitive object={carRoot} />}
-        {poemInteractable && (
+        {infoBubbleInteractable && (
           <mesh
             position={[0, 1.05, 0.1]}
+            userData={{ aqPickId: 'rusty-car-hit' }}
             onPointerDown={(e) => {
               e.stopPropagation();
               const b = e.nativeEvent?.button;
               if (b != null && b !== 0) return;
-              onVintagePoemOpenRequest?.();
+              pulseDistBoostRef.current = computePulseDistBoost();
+              pulseRemainRef.current = RUSTY_CAR_PULSE_SEC;
+              if (AQ_CAR_INFO_DEBUG || AQ_CAR_DEBUG) {
+                console.info('[aqcarinfodebug] rusty car click received (hit mesh)', {
+                  pulseRemainSec: RUSTY_CAR_PULSE_SEC,
+                  intersectionCount: e.intersections?.length ?? 0,
+                  pickIds:
+                    e.intersections?.map((h) => h.object?.userData?.aqPickId) ?? [],
+                  note: 'onRustyCarHacklesToggle runs after pulse; see Scene logs for hackles state',
+                });
+              }
+              onRustyCarHacklesToggle?.();
             }}
-            onPointerOver={() => setPoemHitHover(true)}
-            onPointerOut={() => setPoemHitHover(false)}
+            onPointerOver={() => setInfoHitHover(true)}
+            onPointerOut={() => setInfoHitHover(false)}
           >
             <boxGeometry args={[12, 4.85, 6.55]} />
             <meshBasicMaterial transparent opacity={0} depthWrite={false} />
@@ -172,8 +277,8 @@ function SwampSunkenCarLoaded({
  *   fogFar: number;
  *   fogColor: string;
  *   headlightsEnabled?: boolean;
- *   poemInteractable?: boolean;
- *   onVintagePoemOpenRequest?: () => void;
+ *   infoBubbleInteractable?: boolean;
+ *   onRustyCarHacklesToggle?: () => void;
  * }} props
  */
 export default function SwampSunkenCar(props) {

@@ -19,8 +19,10 @@
  * - `?aqswampkill=car1,car2,headlights,haze,typography,...,poem` — force Swamp layers off (aliases in `swampRecovery.js`).
  * - `?aqorbdebug=1` — orb/beacon mount + tap diagnostics (console).
  * - `?aqcardebug=1` — Swamp submerged cars: distance + headlight anchor logs; optional marker dots.
+ * - `?aqcarinfodebug=1` — rusty car Girl Noise Press: click + reveal state + sign mount (console).
  * - `?aqcompaniondebug=1` — companion schools: mount diagnostics + slightly boosted visibility.
  * - `?aqtouchdebug=1` — CameraRig: touch pinch/pan / rotate gesture diagnostics (console).
+ * - `?aqpoemdebug=1` — Swamp Molly poem: dissipation trigger diagnostics + wireframe trigger volume (console).
  * - `?aqnotransition=1` — skip underwater reveal + world-switch murk (debug).
  */
 
@@ -87,6 +89,11 @@ export const AQ_CAR_DEBUG =
   params.has('aqcardebug') ||
   import.meta.env.VITE_AQ_CAR_DEBUG === '1';
 
+/** Rusty car + Girl Noise Press: visibility / reveal timer diagnostics (`?aqcarinfodebug=1`). */
+export const AQ_CAR_INFO_DEBUG =
+  params.has('aqcarinfodebug') ||
+  import.meta.env.VITE_AQ_CAR_INFO_DEBUG === '1';
+
 /** Ambient companion schools: logging + temporary visibility boost (`?aqcompaniondebug=1`). */
 export const AQ_COMPANION_DEBUG =
   params.has('aqcompaniondebug') ||
@@ -96,6 +103,11 @@ export const AQ_COMPANION_DEBUG =
 export const AQ_TOUCH_DEBUG =
   params.has('aqtouchdebug') ||
   import.meta.env.VITE_AQ_TOUCH_DEBUG === '1';
+
+/** Swamp Molly poem: placement + dissipation + frustum diagnostics (`?aqpoemdebug=1`). */
+export const AQ_POEM_DEBUG =
+  params.has('aqpoemdebug') ||
+  import.meta.env.VITE_AQ_POEM_DEBUG === '1';
 
 /**
  * Verbose theme click / persistence logging (also enabled whenever AQ_THEME_DEBUG is on).

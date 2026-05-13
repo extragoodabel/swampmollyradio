@@ -2,9 +2,14 @@ import { Suspense, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF, useCursor } from '@react-three/drei';
 import * as THREE from 'three';
-import { AQ_CAR_DEBUG } from '../debug/aquariumRecovery.js';
+import { AQ_CAR_DEBUG, AQ_CAR_INFO_DEBUG } from '../debug/aquariumRecovery.js';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import { dimSwampMaterials } from './swampSubmergedGlbUtils.js';
+import {
+  CAR_CLICK_GLOW_COLOR,
+  RUSTY_CAR_CLICK_PULSE_INTENSITY,
+  RUSTY_CAR_PULSE_SEC,
+} from './SwampSunkenCar.jsx';
 
 /**
  * Fiat Panda 4x4 — manual headlight cones (no GLB lamp detection).
@@ -81,6 +86,11 @@ export const FIAT_HEADLIGHT_POOL_OPACITY =
 
 /** Darken GLB slightly more so lights read first in fog. */
 const FIAT_BODY_EXTRA_ALBEDO_MUL = 0.84;
+
+/** Match rusty car: same gold tint + intensity curve (body-only; no additive shell). */
+export const FIAT_CLICK_PULSE_DURATION_SEC = RUSTY_CAR_PULSE_SEC;
+export const FIAT_CLICK_PULSE_INTENSITY = RUSTY_CAR_CLICK_PULSE_INTENSITY;
+export const FIAT_CLICK_GLOW_COLOR = CAR_CLICK_GLOW_COLOR;
 
 const _coneBeamAxis = new THREE.Vector3(0, -1, 0);
 
@@ -291,7 +301,28 @@ function SwampSunkenFiatPandaLoaded({
   const carObjRef = useRef(null);
   const fiatLampsAttachRef = useRef(null);
   const logAcc = useRef(0);
+  const materialPulseBaseRef = useRef(
+    /** @type {Map<THREE.Material, { color?: THREE.Color; emissive?: THREE.Color; emissiveIntensity: number }>} */ (
+      new Map()
+    ),
+  );
+  const pulseRemainRef = useRef(0);
+  const pulseDistBoostRef = useRef(1);
   const { camera } = useThree();
+
+  const computePulseDistBoost = useMemo(
+    () => () => {
+      const fr = frameRef.current;
+      if (!fr) return 1;
+      fr.updateMatrixWorld(true);
+      const c = new THREE.Box3()
+        .setFromObject(fr)
+        .getCenter(new THREE.Vector3());
+      const d = camera.position.distanceTo(c);
+      return THREE.MathUtils.clamp(d / 13, 1, 4.75);
+    },
+    [camera],
+  );
 
   useCursor(creditInteractable && creditHitHover);
 
@@ -342,6 +373,27 @@ function SwampSunkenFiatPandaLoaded({
     syncLocalSpaceGroupFromCar(fiatLampsAttachRef.current, carRoot);
   }, [carRoot]);
 
+  useLayoutEffect(() => {
+    const root = carRoot;
+    if (!root) return;
+    const map = new Map();
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (!m || map.has(m)) continue;
+        const snap = {
+          emissiveIntensity:
+            m.emissiveIntensity !== undefined ? m.emissiveIntensity : 0,
+        };
+        if (m.emissive) snap.emissive = m.emissive.clone();
+        if (m.color) snap.color = m.color.clone();
+        map.set(m, snap);
+      }
+    });
+    materialPulseBaseRef.current = map;
+  }, [carRoot]);
+
   const floorY = seabedY + 0.22;
   const groupPos = useMemo(
     () => [42, floorY - 0.78, 63],
@@ -351,8 +403,41 @@ function SwampSunkenFiatPandaLoaded({
   useFrame((_, delta) => {
     syncLocalSpaceGroupFromCar(fiatLampsAttachRef.current, carRoot);
 
+    const root = carObjRef.current ?? carRoot;
+    const baseMap = materialPulseBaseRef.current;
+    if (root && baseMap?.size) {
+      if (pulseRemainRef.current > 0) {
+        pulseRemainRef.current = Math.max(
+          0,
+          pulseRemainRef.current - delta,
+        );
+      }
+      const u =
+        pulseRemainRef.current <= 0
+          ? 0
+          : 1 - pulseRemainRef.current / FIAT_CLICK_PULSE_DURATION_SEC;
+      const hump = Math.sin(Math.min(1, u) * Math.PI);
+      const db = pulseDistBoostRef.current;
+
+      root.traverse((o) => {
+        if (!o.isMesh) return;
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) {
+          const b = baseMap.get(m);
+          if (!b || !m) continue;
+          const w = hump * 0.48 * FIAT_CLICK_PULSE_INTENSITY * db;
+          if (b.emissive && m.emissive) {
+            m.emissive.copy(b.emissive).lerp(FIAT_CLICK_GLOW_COLOR, Math.min(1, w * 0.38));
+            m.emissiveIntensity = b.emissiveIntensity + w * 1.12;
+          } else if (b.color && m.color) {
+            m.color.copy(b.color).lerp(FIAT_CLICK_GLOW_COLOR, w * 0.16);
+          }
+        }
+      });
+    }
+
     if (!AQ_CAR_DEBUG) return;
-    const car = carObjRef.current ?? carRoot;
+    const car = root;
     if (!car) return;
     logAcc.current += delta;
     if (logAcc.current < 0.9) return;
@@ -438,10 +523,18 @@ function SwampSunkenFiatPandaLoaded({
             {creditInteractable && (
               <mesh
                 position={[0, 0.52, 0.05]}
+                userData={{ aqPickId: 'fiat-credit-hit' }}
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   const b = e.nativeEvent?.button;
                   if (b != null && b !== 0) return;
+                  pulseDistBoostRef.current = computePulseDistBoost();
+                  pulseRemainRef.current = FIAT_CLICK_PULSE_DURATION_SEC;
+                  if (AQ_CAR_INFO_DEBUG || AQ_CAR_DEBUG) {
+                    console.info(
+                      '[aqcarinfodebug] fiat pointer down — pulse + credit request',
+                    );
+                  }
                   onFiatCreditOpenRequest?.();
                 }}
                 onPointerOver={() => setCreditHitHover(true)}
