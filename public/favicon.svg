@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Swamp Molly Radio">
+  <defs>
+    <radialGradient id="beacon" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffe8cc"/>
+      <stop offset="35%" stop-color="#ffaa44"/>
+      <stop offset="70%" stop-color="#cc6600"/>
+      <stop offset="100%" stop-color="#1a1108"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="55%" stop-color="#ff9933" stop-opacity="0"/>
+      <stop offset="85%" stop-color="#ff8833" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#ff7722" stop-opacity="0.2"/>
+    </radialGradient>
+  </defs>
+  <!-- dark vignette field -->
+  <circle cx="16" cy="16" r="15" fill="#050d14"/>
+  <!-- soft outer halo -->
+  <circle cx="16" cy="16" r="14" fill="none" stroke="url(#halo)" stroke-width="1.8" opacity="0.85"/>
+  <!-- beacon orb -->
+  <circle cx="16" cy="16" r="10" fill="url(#beacon)"/>
+  <!-- inner hot core -->
+  <circle cx="16" cy="16" r="5.2" fill="#fff2d6" opacity="0.55"/>
+  <!-- tiny centered fish (side silhouette) -->
+  <g fill="#0d1822" opacity="0.92">
+    <ellipse cx="16" cy="16" rx="3.4" ry="1.55"/>
+    <path d="M 12.4 16 L 9.9 14.25 L 9.9 17.75 Z"/>
+  </g>
+  <!-- eye glint -->
+  <circle cx="17.4" cy="15.65" r="0.45" fill="#2a1810" opacity="0.7"/>
+</svg>

@@ -28,7 +28,7 @@ export const THEMES = {
     displayName: 'swamp molly radio',
     /** Short label for the in-world mode switch (keyboard 2). */
     switchLabel: 'swamp molly radio',
-    pageTitle: 'swamp molly radio',
+    pageTitle: 'Swamp Molly Radio',
     overlayLabel: 'swamp molly radio',
     hint: 'drag to turn\nscroll to drift\nfind the beacon',
 
@@ -403,7 +403,7 @@ export const THEMES = {
     id: 'salmonDaysRadio',
     displayName: 'salmon days radio',
     switchLabel: 'salmon days radio',
-    pageTitle: 'salmon days radio',
+    pageTitle: 'Salmon Days Radio',
     overlayLabel: 'salmon days radio',
     hint: 'drag to turn\nscroll to drift\nfind the beacon',
 

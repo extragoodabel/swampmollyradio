@@ -1,7 +1,8 @@
 {
-  "name": "dark-aquarium",
+  "name": "swamp-molly-radio",
   "private": true,
   "version": "0.1.0",
+  "description": "An interactive underwater radio environment.",
   "type": "module",
   "scripts": {
     "dev": "vite",
