@@ -14,6 +14,7 @@ import ThemeModeControl from './ui/ThemeModeControl.jsx';
 import ThemeCrossfade from './ui/ThemeCrossfade.jsx';
 import { ThemeProvider, useTheme } from './theme/ThemeContext.jsx';
 import ThemeSceneErrorBoundary from './theme/ThemeSceneErrorBoundary.jsx';
+import { WorldTransitionProvider } from './ui/WorldTransitionContext.jsx';
 import { THEME_VER_KEY } from './theme/salmonRecovery.js';
 import {
   AQ_DEBUG,
@@ -36,30 +37,25 @@ import SceneSalmonEmergency from './scene/SceneSalmonEmergency.jsx';
  * Component tree:
  *
  *   <ThemeProvider>             -- holds active themeId + setter
- *     <ThemedShell>             -- reads themeId, wires it down
- *       <RadioProvider          -- theme + default station from theme
- *         <Leva ...>            -- shared debug panel
- *         <Canvas>              -- 3D scene
- *           <CanvasClearToTheme />   -- theme bg + fog if Scene throws
- *           <ThemeSceneErrorBoundary>
- *             <Scene />         -- full engine, or `SceneSalmonEmergency` when debugging
- *           </ThemeSceneErrorBoundary>
- *         </Canvas>
- *         <overlay>             -- per-theme title + hint
- *         <RadioOverlay />      -- per-theme station readout
- *         <ThemeModeControl /> -- portal link to the other aquarium (+ keys 1/2)
- *       </RadioProvider>
- *     </ThemedShell>
+ *     <WorldTransitionProvider> -- murk reveal + wraps mode switches
+ *       <ThemedShell>             -- reads themeId, wires it down
+ *         <RadioProvider          -- theme + default station from theme
+ *           ...
+ *         </RadioProvider>
+ *       </ThemedShell>
+ *     </WorldTransitionProvider>
  *   </ThemeProvider>
  *
- * RadioProvider is *inside* the theme-aware shell so that when the
- * user toggles modes the provider resets the stream (see
- * RadioContext.jsx -> theme change effect).
+ * RadioProvider follows the active theme for default station metadata.
+ * Playback and dial position persist across aquarium mode switches once
+ * the listener has started playback at least once (see RadioContext.jsx).
  */
 export default function App() {
   return (
     <ThemeProvider>
-      <ThemedShell />
+      <WorldTransitionProvider>
+        <ThemedShell />
+      </WorldTransitionProvider>
     </ThemeProvider>
   );
 }
@@ -384,7 +380,7 @@ function ThemedShell() {
               <code>?aqswamprestore=1..13</code> (Swamp),{' '}
               <code>?aqswampkill=car1,haze,…</code>,{' '}
               <code>?aquariumtheme=…</code>, <code>?aqclearsaved=1</code>,{' '}
-              <code>?aqignorestorage=1</code>. Salmon kills:{' '}
+              <code>?aqignorestorage=1</code>, <code>?aqnotransition=1</code>. Salmon kills:{' '}
               <code>?aqsalmonkill=vault,backdrop,whaleSkeleton,whale,…</code>,{' '}
               <code>?aqwhaledebug=1</code>. Logs:{' '}
               <code>?aqthemeswitchlog=1</code>.

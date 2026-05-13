@@ -132,6 +132,11 @@ export default function AmbientCompanionSchools({
   shimmerIntensity,
   useNewSalmonSkins,
   heroDepthCue,
+  scatterEnabled = true,
+  bubbleTrailEnabled = true,
+  bubbleSpawnRate = 1,
+  bubbleLifetime = 2.2,
+  maxBubbles = 120,
 }) {
   const cfg = theme.ambientCompanionSchools;
   if (!cfg?.enabled || !cfg.entries?.length) return null;
@@ -141,6 +146,12 @@ export default function AmbientCompanionSchools({
 
   const debugBoost = AQ_COMPANION_DEBUG ? 1.22 : 1;
   const debugShimmerMul = (cfg.shimmerMul ?? 1) * (AQ_COMPANION_DEBUG ? 1.18 : 1);
+
+  const trailOn =
+    !!bubbleTrailEnabled && scatterEnabled !== false && scatterEnabled !== 'false';
+  const companionBubbleCap = trailOn
+    ? Math.min(48, Math.max(0, Math.round(Number(maxBubbles) * 0.22)))
+    : 0;
 
   const g = {
     wanderSpeed: (cfg.wanderSpeed ?? 0.11) * (AQ_COMPANION_DEBUG ? 1.05 : 1),
@@ -174,16 +185,17 @@ export default function AmbientCompanionSchools({
           shimmerIntensity: shimmerIntensity * shimMul,
           foregroundCrossingChance: e.foregroundCrossingChance ?? 0.06,
           avoidanceRadius: e.avoidance ?? 2.6,
-          scatterEnabled: true,
+          scatterEnabled,
           randomScatterFrequency: 0.09,
           scatterRadius: 3.2,
           scatterStrength: 0.85,
           scatterDuration: 0.4,
           scatterRecoverySpeed: 1,
           chainReactionChance: 0.35,
-          bubbleTrailEnabled: false,
-          bubbleSpawnRate: 0,
-          maxBubbles: 0,
+          bubbleTrailEnabled: trailOn,
+          bubbleSpawnRate: trailOn ? Number(bubbleSpawnRate) * 0.55 : 0,
+          bubbleLifetime,
+          maxBubbles: companionBubbleCap,
           lightBeam: null,
           clusterAnchorY: 0,
           heroDepthCue,

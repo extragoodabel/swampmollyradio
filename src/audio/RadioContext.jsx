@@ -39,7 +39,9 @@ import {
  *
  * The Now Playing JSON endpoint is polled best-effort while playback
  * is active. A CORS failure there is also non-fatal: we just leave
- * `nowPlaying` null and the overlay falls back to the station name.
+ * Theme changes update the default station only before the first successful
+ * play (`hasEverPlayed`); after that, dial position and play/pause survive
+ * aquarium mode switches without tearing down the audio element.
  */
 
 const RadioCtx = createContext(null);
@@ -93,6 +95,8 @@ export function RadioProvider({
 
   const swapLockRef = useRef(false);
   const lastThemeIdRef = useRef(themeId);
+  const hasEverPlayedRef = useRef(false);
+  hasEverPlayedRef.current = hasEverPlayed;
 
   /**
    * Synchronous flag read by `CameraRig` (via microtask-deferred pointerdown)
@@ -470,30 +474,52 @@ export function RadioProvider({
   }, [teardownGraph]);
 
   /**
-   * Theme toggle: reset dial default + hard-stop audio (same as legacy
-   * `stationId` change — no crossfade across aquarium modes).
+   * Theme change: keep play/pause + dial position once the listener has started
+   * playback at least once; until then, follow each world's default station
+   * (still without touching playback unless they're already playing).
    */
   useEffect(() => {
     if (lastThemeIdRef.current === themeId) return;
     lastThemeIdRef.current = themeId;
 
-    setActiveStationId(normalizeDialStationId(themeDefaultStationId));
+    if (!hasEverPlayedRef.current) {
+      const def = normalizeDialStationId(themeDefaultStationId);
+      setActiveStationId(def);
+      const audio = audioRef.current;
+      if (audio) {
+        try {
+          audio.pause();
+        } catch {
+          /* ignore */
+        }
+        const st = getStation(def);
+        if (audio.dataset.radioStationId !== st.id) {
+          audio.dataset.radioStationId = st.id;
+          audio.src = st.streamUrl;
+          audio.load();
+        }
+      }
+      return;
+    }
 
-    if (audioRef.current) {
+    if (playingRef.current) {
+      return;
+    }
+
+    const audio = audioRef.current;
+    if (!audio) return;
+    const st = getStation(activeStationIdRef.current);
+    if (audio.dataset.radioStationId !== st.id) {
       try {
-        audioRef.current.pause();
-        audioRef.current.src = '';
+        audio.pause();
       } catch {
         /* ignore */
       }
-      audioRef.current = null;
+      audio.dataset.radioStationId = st.id;
+      audio.src = st.streamUrl;
+      audio.load();
     }
-    teardownGraph();
-    setIsPlaying(false);
-    setIsLoading(false);
-    setError(null);
-    setNowPlaying(null);
-  }, [themeId, themeDefaultStationId, teardownGraph]);
+  }, [themeId, themeDefaultStationId]);
 
   /**
    * When the default station id string for the *current* theme updates

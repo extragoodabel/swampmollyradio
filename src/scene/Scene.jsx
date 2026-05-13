@@ -257,7 +257,50 @@ export default function Scene() {
     riderSalmonShimmerBoost,
     riderSalmonCanScatter,
     kelpMossRatio,
-  }, setLeva] = useControls(() => ({
+  }, setLeva] = useControls(() => {
+    const levaOf = (off, spec) => (off ? { ...spec, disabled: true } : spec);
+    const dDensity =
+      !(
+        (themeId !== 'salmonDaysRadio' || salmonEnv.densityCloudsMidfield) &&
+        (themeId !== 'swamp' || swampGates.density)
+      );
+    const dLight =
+      AQ_LITE_ATMOSPHERE ||
+      (themeId === 'salmonDaysRadio' && salmonRestoreStep < 8) ||
+      (themeId === 'swamp' && !swampGates.lightBeam);
+    const dDust =
+      (themeId === 'salmonDaysRadio' && salmonRestoreStep < 4) ||
+      (themeId === 'swamp' && !swampGates.particles);
+    const dAmbBub =
+      (themeId === 'salmonDaysRadio' && salmonRestoreStep < 4) ||
+      (themeId === 'swamp' && !swampGates.bubbles);
+    const dHaze =
+      (themeId === 'salmonDaysRadio' && !salmonEnv.waterHaze) ||
+      (themeId === 'swamp' && !swampGates.waterHaze);
+    const dBg =
+      (themeId === 'swamp' && !swampGates.background) ||
+      (themeId === 'salmonDaysRadio' && !salmonEnv.backdrop);
+    const dSwampSurface =
+      themeId !== 'swamp' || (themeId === 'swamp' && !swampGates.surface);
+    const dSwampSeabed =
+      themeId !== 'swamp' || (themeId === 'swamp' && !swampGates.seabed);
+    const dSwampKelp =
+      themeId !== 'swamp' || (themeId === 'swamp' && !swampGates.kelp);
+    const phraseGate = normalizeFloatingPhrase(theme.letters.text ?? '');
+    const slotGate = resolveRadioSlotIndex(phraseGate, theme.letters.radioSlot);
+    const dRadioPos =
+      slotGate != null &&
+      !AQ_SKIP_TYPOGRAPHY &&
+      (themeId !== 'salmonDaysRadio' || salmonRestoreStep >= 2) &&
+      (themeId !== 'swamp' || swampGates.typography) &&
+      (themeId !== 'salmonDaysRadio' || salmonRestoreStep >= 3) &&
+      (themeId !== 'swamp' || swampGates.orb);
+    const dLetters =
+      AQ_SKIP_TYPOGRAPHY ||
+      (themeId === 'salmonDaysRadio' && salmonRestoreStep < 2) ||
+      (themeId === 'swamp' && !swampGates.typography);
+
+    return {
     school: folder({
       // `heroFishCount` controls the close, fully-interactive school
       // (scatter, shimmer, camera avoidance, etc.). For broader
@@ -270,47 +313,49 @@ export default function Scene() {
       foregroundCrossingChance: { value: 0.18, min: 0, max: 0.5, step: 0.01 },
     }),
     density: folder({
-      // Master toggle for the surround-density layers (midfield +
-      // distant clouds). Disable to inspect the hero school in
-      // isolation.
-      densityLayerEnabled: { value: true },
+      // Master toggle for the surround-density layers (midfield,
+      // distant clouds, and salmon distant silhouette fish). Disable
+      // to inspect the hero school in isolation.
+      densityLayerEnabled: levaOf(dDensity, { value: true }),
       // Mid-distance instanced billboards. 0 disables the layer.
       // Defaults pulled WAY back from the previous 420; the goal of
       // the midfield is now atmospheric presence, not an extra school.
-      midfieldFishCount: { value: 110, min: 0, max: 800, step: 10 },
+      midfieldFishCount: levaOf(dDensity, { value: 110, min: 0, max: 800, step: 10 }),
       // Multiplier applied to each background cloud's base count.
       // Pulled back to 0.3 so the deep clouds read as texture, not
       // population.
-      backgroundCloudDensity: { value: 0.3, min: 0, max: 3, step: 0.05 },
+      backgroundCloudDensity: levaOf(dDensity, { value: 0.3, min: 0, max: 3, step: 0.05 }),
       // Vertical extent (radius along Y) of the midfield surround
       // volume. Larger = fish further above and below the camera.
-      verticalSpread: { value: 10, min: 4, max: 22, step: 0.5 },
+      verticalSpread: levaOf(dDensity, { value: 10, min: 4, max: 22, step: 0.5 }),
       // Horizontal/depth radius of the midfield surround volume.
       // Pushed out from 18 to 24 so the average distant fish is now
       // *further* from the camera, reading as a smaller silhouette.
-      worldRadius: { value: 24, min: 8, max: 40, step: 1 },
+      worldRadius: levaOf(dDensity, { value: 24, min: 8, max: 40, step: 1 }),
       // Global opacity multiplier for the midfield instances.
-      distantFishOpacity: { value: 0.32, min: 0, max: 1, step: 0.05 },
+      distantFishOpacity: levaOf(dDensity, { value: 0.32, min: 0, max: 1, step: 0.05 }),
       // Multiplier applied to background cloud rotation speed.
-      backgroundSwarmSpeed: { value: 0.4, min: 0, max: 3, step: 0.05 },
+      backgroundSwarmSpeed: levaOf(dDensity, { value: 0.4, min: 0, max: 3, step: 0.05 }),
       // Edge falloff: midfield fish at the rim of the world sphere
       // fade toward this opacity multiplier. Keeps the periphery from
       // looking populated and gives a sense of breathing negative
       // space.
-      peripheralDensity: { value: 0.25, min: 0, max: 1, step: 0.05 },
+      peripheralDensity: levaOf(dDensity, { value: 0.25, min: 0, max: 1, step: 0.05 }),
       // Master multiplier on all distant motion (cloud rotation,
       // midfield current bias). 1.0 = legacy churn, 0.4 = calm drift.
-      backgroundMotionStrength: { value: 0.35, min: 0, max: 2, step: 0.05 },
+      backgroundMotionStrength: levaOf(dDensity, { value: 0.35, min: 0, max: 2, step: 0.05 }),
       // Master multiplier on the *counts* of both midfield + bg
       // layers. Use this to fade the entire density system up or
       // down together without touching individual sliders.
-      atmosphericDensity: { value: 0.6, min: 0, max: 2, step: 0.05 },
+      atmosphericDensity: levaOf(dDensity, { value: 0.6, min: 0, max: 2, step: 0.05 }),
       // Boosts hero visual dominance by strengthening distant *atmospheric*
       // silhouette / fog crush (see MidfieldSchool `uAtmosphereCrush`), not
       // by lowering distant alpha.
-      heroFishDominance: { value: 1.4, min: 0.5, max: 3, step: 0.05 },
+      heroFishDominance: levaOf(dDensity, { value: 1.4, min: 0.5, max: 3, step: 0.05 }),
     }),
     scatter: folder({
+      // Hero, salmon satellites, ambient companions, typography beacon
+      // satellite school (when theme enables it).
       scatterEnabled: { value: true },
       randomScatterFrequency: { value: 0.30, min: 0, max: 3, step: 0.05 },
       scatterRadius: { value: 4.0, min: 0.5, max: 12, step: 0.1 },
@@ -340,13 +385,13 @@ export default function Scene() {
       maxPitchDegrees: { value: 70, min: 10, max: 89, step: 1 },
     }),
     background: folder({
-      displacementStrength: { value: 2.5, min: 0, max: 8, step: 0.1 },
-      noiseScale: { value: 2.6, min: 0.5, max: 8, step: 0.1 },
-      animationSpeed: { value: 0.18, min: 0, max: 1.0, step: 0.01 },
-      gradientIntensity: { value: 1.0, min: 0, max: 2, step: 0.05 },
-      pinkAccentStrength: { value: 0.6, min: 0, max: 2, step: 0.05 },
-      diagonalFlowStrength: { value: 1.0, min: 0, max: 3, step: 0.05 },
-      backgroundOpacity: { value: 0.85, min: 0, max: 1, step: 0.01 },
+      displacementStrength: levaOf(dBg, { value: 2.5, min: 0, max: 8, step: 0.1 }),
+      noiseScale: levaOf(dBg, { value: 2.6, min: 0.5, max: 8, step: 0.1 }),
+      animationSpeed: levaOf(dBg, { value: 0.18, min: 0, max: 1.0, step: 0.01 }),
+      gradientIntensity: levaOf(dBg, { value: 1.0, min: 0, max: 2, step: 0.05 }),
+      pinkAccentStrength: levaOf(dBg, { value: 0.6, min: 0, max: 2, step: 0.05 }),
+      diagonalFlowStrength: levaOf(dBg, { value: 1.0, min: 0, max: 3, step: 0.05 }),
+      backgroundOpacity: levaOf(dBg, { value: 0.85, min: 0, max: 1, step: 0.01 }),
     }),
     water: folder({
       // Theme defaults are applied on mode switch via `setLeva`
@@ -356,19 +401,19 @@ export default function Scene() {
       // theme patches and encouraging accidental ultra-tight fog bands.
       fogNear: { value: theme.water.fogNear, min: 0, max: 80, step: 0.5 },
       fogFar: { value: theme.water.fogFar, min: 8, max: 220, step: 1 },
-      waterHazeOpacity: {
+      waterHazeOpacity: levaOf(dHaze, {
         value: theme.water.waterHazeOpacity,
         min: 0,
         max: 0.8,
         step: 0.01,
-      },
-      hazeLayerCount: {
+      }),
+      hazeLayerCount: levaOf(dHaze, {
         value: theme.water.hazeLayerCount,
         min: 0,
         max: 6,
         step: 1,
-      },
-      hazeMovementSpeed: { value: 1.0, min: 0, max: 3, step: 0.05 },
+      }),
+      hazeMovementSpeed: levaOf(dHaze, { value: 1.0, min: 0, max: 3, step: 0.05 }),
       // Legacy scalar that multiplies the dust count on top of the
       // explicit `particleCount` below. Left in place for backward
       // compatibility with the water-haze tuning workflow.
@@ -387,12 +432,12 @@ export default function Scene() {
       // PointsMaterial, so 320 reads as roughly the same density
       // as 700 used to. Pushing this slider up is the right knob
       // for users who want a heavier suspended-life feel.
-      particleCount: { value: 320, min: 80, max: 2000, step: 20 },
-      particleOpacity: { value: 0.40, min: 0, max: 1, step: 0.01 },
+      particleCount: levaOf(dDust, { value: 320, min: 80, max: 2000, step: 20 }),
+      particleOpacity: levaOf(dDust, { value: 0.40, min: 0, max: 1, step: 0.01 }),
       // Multiplier on the per-particle sine pulse amplitude. 0 ==
       // particles hold their base alpha; 1 == default "catch the
       // light" pulse; >1 == more visible twinkle.
-      particleShimmerStrength: { value: 0.8, min: 0, max: 2.5, step: 0.05 },
+      particleShimmerStrength: levaOf(dDust, { value: 0.8, min: 0, max: 2.5, step: 0.05 }),
 
       // ---- Ambient bubbles (AmbientBubbles) ---------------------
       //
@@ -403,18 +448,18 @@ export default function Scene() {
       // Pulled back from 60 / 1.2 so bubbles read as occasional
       // life rather than a steady column. The user can crank both
       // sliders for a "fish farm" vibe.
-      ambientBubbleCount: { value: 24, min: 0, max: 240, step: 5 },
+      ambientBubbleCount: levaOf(dAmbBub, { value: 24, min: 0, max: 240, step: 5 }),
       // Bubbles per second. Combined with bubbleRiseSpeed this also
       // sets average bubble lifetime, which feeds back into how
       // dense the column reads.
-      ambientBubbleSpawnRate: { value: 0.4, min: 0, max: 6, step: 0.05 },
-      bubbleOpacity: { value: 0.40, min: 0, max: 1, step: 0.01 },
+      ambientBubbleSpawnRate: levaOf(dAmbBub, { value: 0.4, min: 0, max: 6, step: 0.05 }),
+      bubbleOpacity: levaOf(dAmbBub, { value: 0.40, min: 0, max: 1, step: 0.01 }),
       // Multiplier on the per-bubble base rise rate. The base rate
       // is randomised per bubble for variety; this scales the lot.
-      bubbleRiseSpeed: { value: 1.0, min: 0.1, max: 3, step: 0.05 },
+      bubbleRiseSpeed: levaOf(dAmbBub, { value: 1.0, min: 0.1, max: 3, step: 0.05 }),
       // Multiplier on the random portion of bubble base size.
       // 0 == tiny uniform bubbles; 2 == strong size variety.
-      bubbleSizeVariation: { value: 1.0, min: 0, max: 2.5, step: 0.05 },
+      bubbleSizeVariation: levaOf(dAmbBub, { value: 1.0, min: 0, max: 2.5, step: 0.05 }),
     }),
     radio: folder({
       ambientRadioEnabled: { value: true },
@@ -423,10 +468,9 @@ export default function Scene() {
       // interaction in the scene, and the recent water/particle
       // changes were making it disappear into the haze.
       radioGlowIntensity: { value: 1.35, min: 0, max: 3, step: 0.05 },
-      // Vec3 input -- the orb lives at this position in world space.
-      // Default places it in the mid-volume, slightly right of centre
-      // and a touch above the school's home y-band.
-      radioPosition: { value: { x: 3, y: 0.6, z: -4.5 }, step: 0.1 },
+      // Embedded typography beacon: position is driven by the slot
+      // (this control applies to standalone ambient orb only).
+      radioPosition: levaOf(dRadioPos, { value: { x: 3, y: 0.6, z: -4.5 }, step: 0.1 }),
       underwaterAudioFilterStrength: {
         value: 0.55,
         min: 0,
@@ -437,98 +481,98 @@ export default function Scene() {
     light: folder({
       // Master toggle for the cinematic sun shaft. Shader + layout are
       // theme-specific (`ocean` vs `swamp` in themes.js), not just colours.
-      lightBeamEnabled: { value: true },
-      beamPositionX: {
+      lightBeamEnabled: levaOf(dLight, { value: true }),
+      beamPositionX: levaOf(dLight, {
         value: theme.beam.position[0],
         min: -16,
         max: 16,
         step: 0.5,
-      },
-      beamPositionY: {
+      }),
+      beamPositionY: levaOf(dLight, {
         value: theme.beam.position[1],
         min: 2,
         max: 22,
         step: 0.5,
-      },
-      beamPositionZ: {
+      }),
+      beamPositionZ: levaOf(dLight, {
         value: theme.beam.position[2],
         min: -22,
         max: 6,
         step: 0.5,
-      },
-      beamAngle: {
+      }),
+      beamAngle: levaOf(dLight, {
         value: theme.beam.angleDegrees,
         min: -60,
         max: 60,
         step: 1,
-      },
-      beamWidth: { value: theme.beam.width, min: 0.3, max: 16, step: 0.1 },
-      beamLength: {
+      }),
+      beamWidth: levaOf(dLight, { value: theme.beam.width, min: 0.3, max: 16, step: 0.1 }),
+      beamLength: levaOf(dLight, {
         value: theme.beam.length,
         min: 4,
         max: 32,
         step: 0.5,
-      },
-      beamIntensity: {
+      }),
+      beamIntensity: levaOf(dLight, {
         value: theme.beam.intensity,
         min: 0,
         max: 3,
         step: 0.05,
-      },
-      beamOpacity: {
+      }),
+      beamOpacity: levaOf(dLight, {
         value: theme.beam.opacity,
         min: 0,
         max: 1,
         step: 0.01,
-      },
-      beamSoftness: {
+      }),
+      beamSoftness: levaOf(dLight, {
         value: theme.beam.softness,
         min: 0.35,
         max: 6,
         step: 0.05,
-      },
-      beamFalloff: {
+      }),
+      beamFalloff: levaOf(dLight, {
         value: theme.beam.falloff,
         min: 0.05,
         max: 2.5,
         step: 0.01,
-      },
-      beamDiffusion: {
+      }),
+      beamDiffusion: levaOf(dLight, {
         value: theme.beam.diffusion,
         min: 0.2,
         max: 3.5,
         step: 0.05,
-      },
-      beamCausticStrength: {
+      }),
+      beamCausticStrength: levaOf(dLight, {
         value: theme.beam.causticStrength,
         min: 0,
         max: 1,
         step: 0.01,
-      },
-      beamNoiseScale: {
+      }),
+      beamNoiseScale: levaOf(dLight, {
         value: theme.beam.noiseScale,
         min: 1,
         max: 24,
         step: 0.5,
-      },
-      beamRegionSize: {
+      }),
+      beamRegionSize: levaOf(dLight, {
         value: theme.beam.regionSize,
         min: 1,
         max: 4,
         step: 0.05,
-      },
-      beamShimmerSpeed: {
+      }),
+      beamShimmerSpeed: levaOf(dLight, {
         value: theme.beam.shimmerSpeed,
         min: 0,
         max: 3,
         step: 0.05,
-      },
-      beamColorWarmth: {
+      }),
+      beamColorWarmth: levaOf(dLight, {
         value: theme.beam.colorWarmth,
         min: 0,
         max: 1.5,
         step: 0.05,
-      },
+      }),
     }),
     salmon: folder({
       // Master switch between the new pixel-art WebP sprites and the
@@ -557,92 +601,92 @@ export default function Scene() {
     }),
     letters: folder({
       // Master toggle for floating environmental typography.
-      floatingLettersEnabled: { value: true },
+      floatingLettersEnabled: levaOf(dLetters, { value: true }),
       // SDF text fontSize. Kept small so even letters that drift
       // close to the camera don't dominate the frame.
-      letterScale: { value: 0.34, min: 0.08, max: 1.4, step: 0.01 },
+      letterScale: levaOf(dLetters, { value: 0.34, min: 0.08, max: 1.4, step: 0.01 }),
       // Base fillOpacity (combined with shimmer pulse + beam catch
       // + haze fade per frame). Default balances murk with readability
       // at the typography-framed opening camera distance.
-      letterOpacity: { value: 0.7, min: 0.05, max: 1, step: 0.01 },
+      letterOpacity: levaOf(dLetters, { value: 0.7, min: 0.05, max: 1, step: 0.01 }),
       // Per-letter z range: theme layout uses a shallow ordered arc +
       // jitter so phrases stay readable; this caps overall depth feel.
-      letterDepthSpread: { value: 4.6, min: 0, max: 14, step: 0.1 },
+      letterDepthSpread: levaOf(dLetters, { value: 4.6, min: 0, max: 14, step: 0.1 }),
       // Horizontal step between letter centres. Also drives the Y
       // jitter (see FloatingLetters.jsx).
-      letterSpacing: { value: 1.2, min: 0.3, max: 3.5, step: 0.05 },
+      letterSpacing: levaOf(dLetters, { value: 1.2, min: 0.3, max: 3.5, step: 0.05 }),
       // 0 = faded off-white. 1 = deep desaturated teal water tint.
       // Default sits well past the midpoint so the letters look
       // water-stained / sea-worn rather than pearl-bright.
-      letterMurkiness: { value: 0.78, min: 0, max: 1, step: 0.01 },
+      letterMurkiness: levaOf(dLetters, { value: 0.78, min: 0, max: 1, step: 0.01 }),
       // Multi-sine broken shimmer amplitude on fillOpacity. Drives
       // the "uneven highlight" feel rather than a clean pulse.
-      letterShimmerStrength: { value: 0.64, min: 0, max: 2, step: 0.05 },
+      letterShimmerStrength: levaOf(dLetters, { value: 0.64, min: 0, max: 2, step: 0.05 }),
       // Amplitude of the current-driven swish: position drift +
       // X-flap / Y-twist / Z-tilt + tiny vertical flutter all
       // scale with this. Higher = more cloth-like motion.
-      letterFloatStrength: { value: 0.06, min: 0, max: 0.4, step: 0.005 },
+      letterFloatStrength: levaOf(dLetters, { value: 0.06, min: 0, max: 0.4, step: 0.005 }),
     }),
     surface: folder({
       // Master toggle for the overhead water-surface layer. The
       // viewer sees the *underside* of the surface from below; the
       // shimmer reads as refracted sunlight.
-      surfaceEnabled: { value: true },
+      surfaceEnabled: levaOf(dSwampSurface, { value: true }),
       // World-Y of the mean surface level. Camera lives near Y=0, so
       // 14 places it well above the densest part of the school but
       // still inside the fog far-plane so the rim dissolves into the
       // water medium.
-      surfaceHeight: { value: 14, min: 6, max: 30, step: 0.5 },
-      surfaceOpacity: { value: 0.55, min: 0, max: 1, step: 0.01 },
+      surfaceHeight: levaOf(dSwampSurface, { value: 14, min: 6, max: 30, step: 0.5 }),
+      surfaceOpacity: levaOf(dSwampSurface, { value: 0.55, min: 0, max: 1, step: 0.01 }),
       // Vertical amplitude of the wave displacement.
-      surfaceRippleStrength: { value: 0.45, min: 0, max: 2, step: 0.05 },
-      surfaceRippleSpeed: { value: 0.5, min: 0, max: 2, step: 0.05 },
+      surfaceRippleStrength: levaOf(dSwampSurface, { value: 0.45, min: 0, max: 2, step: 0.05 }),
+      surfaceRippleSpeed: levaOf(dSwampSurface, { value: 0.5, min: 0, max: 2, step: 0.05 }),
       // How strongly the caustic field is mixed into the base aqua.
-      surfaceShimmerStrength: { value: 1.0, min: 0, max: 2.5, step: 0.05 },
+      surfaceShimmerStrength: levaOf(dSwampSurface, { value: 1.0, min: 0, max: 2.5, step: 0.05 }),
       // How much warm yellow is blended into the brightest caustic
       // peaks. 0 = pure aqua highlights; 1 = strongly sun-tinted.
-      surfaceYellowIntensity: { value: 0.6, min: 0, max: 1.5, step: 0.05 },
+      surfaceYellowIntensity: levaOf(dSwampSurface, { value: 0.6, min: 0, max: 1.5, step: 0.05 }),
       // Diagonal drift speed of the wave/light field.
-      surfaceDiagonalFlow: { value: 1.0, min: 0, max: 3, step: 0.05 },
+      surfaceDiagonalFlow: levaOf(dSwampSurface, { value: 1.0, min: 0, max: 3, step: 0.05 }),
       // How quickly the rim dissolves into the scene fog colour.
-      surfaceFogBlend: { value: 1.0, min: 0, max: 2, step: 0.05 },
+      surfaceFogBlend: levaOf(dSwampSurface, { value: 1.0, min: 0, max: 2, step: 0.05 }),
     }),
     seabed: folder({
       // Master toggle for the sandy floor. Disabling leaves the
       // empty deep blue below the fish, which can be useful for
       // isolating other layers while tuning.
-      seabedEnabled: { value: true },
+      seabedEnabled: levaOf(dSwampSeabed, { value: true }),
       // World-Y distance below the camera at which the seabed sits.
       // Sets the visual "bottom" of the world. Also drives where
       // the kelp roots if the kelp layer is enabled below.
-      seabedDepth: { value: 12, min: 4, max: 30, step: 0.5 },
-      seabedOpacity: { value: 0.85, min: 0, max: 1, step: 0.01 },
+      seabedDepth: levaOf(dSwampSeabed, { value: 12, min: 4, max: 30, step: 0.5 }),
+      seabedOpacity: levaOf(dSwampSeabed, { value: 0.85, min: 0, max: 1, step: 0.01 }),
       // Amplitude of the broad dune displacement. Kept small so the
       // floor never reads as terrain or mountains.
-      seabedRippleStrength: { value: 0.55, min: 0, max: 1.5, step: 0.05 },
-      seabedRippleSpeed: { value: 0.4, min: 0, max: 1.5, step: 0.05 },
+      seabedRippleStrength: levaOf(dSwampSeabed, { value: 0.55, min: 0, max: 1.5, step: 0.05 }),
+      seabedRippleSpeed: levaOf(dSwampSeabed, { value: 0.4, min: 0, max: 1.5, step: 0.05 }),
       // How strongly the warm-gold caustic peaks colour-mix into
       // the base cream sand. 0 = pure white-cream highlights.
-      seabedGoldIntensity: { value: 0.55, min: 0, max: 1.5, step: 0.05 },
+      seabedGoldIntensity: levaOf(dSwampSeabed, { value: 0.55, min: 0, max: 1.5, step: 0.05 }),
     }),
     kelp: folder({
       // Master toggle for the kelp/seaweed layer.
-      kelpEnabled: { value: true },
+      kelpEnabled: levaOf(dSwampKelp, { value: true }),
       // Strand population. Default lives in the "atmospheric but
       // sparse" zone; pushing toward the upper end gives a denser
       // kelp forest silhouette.
-      kelpDensity: { value: 90, min: 0, max: 400, step: 1 },
+      kelpDensity: levaOf(dSwampKelp, { value: 90, min: 0, max: 400, step: 1 }),
       // Pushes strands toward the outer rim. 0 = uniform across
       // the annulus around the camera; > 0 keeps the foreground
       // open and stacks more strands in the distance.
-      kelpDistanceBias: { value: 1.2, min: 0, max: 3, step: 0.1 },
-      kelpSwayStrength: { value: 1.0, min: 0, max: 2.5, step: 0.05 },
-      kelpSwaySpeed: { value: 0.6, min: 0, max: 2, step: 0.05 },
-      kelpOpacity: { value: 0.55, min: 0, max: 1, step: 0.01 },
+      kelpDistanceBias: levaOf(dSwampKelp, { value: 1.2, min: 0, max: 3, step: 0.1 }),
+      kelpSwayStrength: levaOf(dSwampKelp, { value: 1.0, min: 0, max: 2.5, step: 0.05 }),
+      kelpSwaySpeed: levaOf(dSwampKelp, { value: 0.6, min: 0, max: 2, step: 0.05 }),
+      kelpOpacity: levaOf(dSwampKelp, { value: 0.55, min: 0, max: 1, step: 0.01 }),
       // Fraction of kelp strands rendered as broad moss clumps
       // rather than slim spiraling ribbons. Swamp ~0.42; Salmon Days keeps
       // 0 — kelp layer is not mounted in open-water mode.
-      kelpMossRatio: { value: theme.kelp.mossRatio, min: 0, max: 1, step: 0.01 },
+      kelpMossRatio: levaOf(dSwampKelp, { value: theme.kelp.mossRatio, min: 0, max: 1, step: 0.01 }),
     }),
     recovery: folder({
       '— Reset Leva storage —': button(() => {
@@ -659,7 +703,14 @@ export default function Scene() {
         window.location.reload();
       }),
     }),
-  }), []);
+  };
+  }, [
+    themeId,
+    salmonRestoreStep,
+    theme,
+    swampGates,
+    salmonEnv,
+  ]);
 
   // Default ON when Leva omits the key (`undefined && …` was falsy — hid letters forever).
   const mountFloatingLetters =
@@ -742,12 +793,34 @@ export default function Scene() {
       mainTexture: bc.mainTexture ?? theme.fish.mainTexture,
       riderTexture: bc.riderTexture ?? theme.fish.riderTexture,
       textureFacesLeft: bc.textureFacesLeft ?? theme.fish.textureFacesLeft,
+      scatterEnabled,
+      randomScatterFrequency,
+      scatterRadius,
+      scatterStrength,
+      scatterDuration,
+      scatterRecoverySpeed,
+      chainReactionChance,
+      bubbleTrailEnabled,
+      bubbleSpawnRate,
+      bubbleLifetime,
+      maxBubbles,
     };
   }, [
     theme.radio?.beaconCompanionFish,
     theme.fish.mainTexture,
     theme.fish.riderTexture,
     theme.fish.textureFacesLeft,
+    scatterEnabled,
+    randomScatterFrequency,
+    scatterRadius,
+    scatterStrength,
+    scatterDuration,
+    scatterRecoverySpeed,
+    chainReactionChance,
+    bubbleTrailEnabled,
+    bubbleSpawnRate,
+    bubbleLifetime,
+    maxBubbles,
   ]);
 
   const floatingTypographyProps = useMemo(
@@ -1599,8 +1672,8 @@ export default function Scene() {
       {themeId === 'salmonDaysRadio' && salmonEnv.waterHaze && (
         <ErrorBoundary fallback={null}>
           <WaterHaze
-            layerCount={Math.min(2, displayHazeLayerCount)}
-            opacity={Math.min(0.09, displayHazeOpacity * 0.5)}
+            layerCount={Math.min(4, displayHazeLayerCount)}
+            opacity={Math.min(0.38, displayHazeOpacity * 0.92)}
             speed={hazeMovementSpeed}
             color={fogColor}
             causticColor={waterHazeAtm?.causticColor ?? '#7fb8c8'}
@@ -1755,8 +1828,10 @@ export default function Scene() {
               scatterDuration={scatterDuration}
               scatterRecoverySpeed={scatterRecoverySpeed}
               chainReactionChance={chainReactionChance}
+              bubbleTrailEnabled={bubbleTrailEnabled}
               bubbleSpawnRate={bubbleSpawnRate}
               bubbleLifetime={bubbleLifetime}
+              maxBubbles={maxBubbles}
             />
           </Suspense>
         </ErrorBoundary>
@@ -1847,6 +1922,11 @@ export default function Scene() {
             shimmerIntensity={shimmerIntensity}
             useNewSalmonSkins={useNewSalmonSkins}
             heroDepthCue={atm?.heroFishAtmosphere ?? null}
+            scatterEnabled={scatterEnabled}
+            bubbleTrailEnabled={bubbleTrailEnabled}
+            bubbleSpawnRate={bubbleSpawnRate}
+            bubbleLifetime={bubbleLifetime}
+            maxBubbles={maxBubbles}
           />
         </ErrorBoundary>
       )}
@@ -1900,7 +1980,7 @@ export default function Scene() {
       {themeId === 'salmonDaysRadio' &&
         !AQ_SCENE_MINIMAL &&
         salmonEnv.distantSilhouettes &&
-        densityLayerEnabled && (
+        densitySurroundOn && (
         <ErrorBoundary fallback={null}>
           <SalmonShadowFishSilhouettes
             density={

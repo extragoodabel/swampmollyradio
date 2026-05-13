@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { AQ_THEME_SWITCH_LOG } from '../debug/aquariumRecovery.js';
 import { getTheme, otherThemeId } from '../theme/themes.js';
 import { useTheme } from '../theme/ThemeContext.jsx';
+import { useAquariumWorldTransition } from './WorldTransitionContext.jsx';
 
 const SWAMP_ID = 'swamp';
 const SALMON_DAYS_RADIO_ID = 'salmonDaysRadio';
@@ -11,7 +12,8 @@ const SALMON_DAYS_RADIO_ID = 'salmonDaysRadio';
  * Keyboard: 1 = Salmon Days Radio, 2 = Swamp Molly Radio (not shown in UI).
  */
 export default function ThemeModeControl() {
-  const { themeId, setTheme } = useTheme();
+  const { themeId } = useTheme();
+  const { switchTheme } = useAquariumWorldTransition();
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -40,7 +42,7 @@ export default function ThemeModeControl() {
             localStorageTheme: ls,
           });
         }
-        setTheme(SALMON_DAYS_RADIO_ID);
+        switchTheme(SALMON_DAYS_RADIO_ID);
       } else if (e.key === '2') {
         e.preventDefault();
         if (AQ_THEME_SWITCH_LOG) {
@@ -56,12 +58,12 @@ export default function ThemeModeControl() {
             localStorageTheme: ls,
           });
         }
-        setTheme(SWAMP_ID);
+        switchTheme(SWAMP_ID);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [setTheme, themeId]);
+  }, [switchTheme, themeId]);
 
   useEffect(() => {
     document.documentElement.dataset.aquariumTheme = themeId;
@@ -89,7 +91,7 @@ export default function ThemeModeControl() {
               localStorageTheme: ls,
             });
           }
-          setTheme(destinationId);
+          switchTheme(destinationId);
         }}
         aria-label={`Go to ${destination.displayName}`}
       >

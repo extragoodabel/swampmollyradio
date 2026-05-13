@@ -30,7 +30,7 @@ export const THEMES = {
     switchLabel: 'swamp molly radio',
     pageTitle: 'swamp molly radio',
     overlayLabel: 'swamp molly radio',
-    hint: 'drag to turn\nscroll to drift',
+    hint: 'drag to turn\nscroll to drift\nfind the beacon',
 
     /**
      * Light beam: localized, murky shafts — southern-gothic / headlights-in-fog.
@@ -405,7 +405,7 @@ export const THEMES = {
     switchLabel: 'salmon days radio',
     pageTitle: 'salmon days radio',
     overlayLabel: 'salmon days radio',
-    hint: 'drag to turn\nscroll to drift',
+    hint: 'drag to turn\nscroll to drift\nfind the beacon',
 
     /**
      * Light beam: expansive open-water refracted sun — not a recoloured swamp shaft.

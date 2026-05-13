@@ -20,8 +20,10 @@ export default function SalmonSatelliteSchools({
   scatterDuration,
   scatterRecoverySpeed,
   chainReactionChance,
+  bubbleTrailEnabled = true,
   bubbleSpawnRate,
   bubbleLifetime,
+  maxBubbles = 120,
 }) {
   const { theme, themeId } = useTheme();
   const atm = theme.atmosphere;
@@ -48,6 +50,11 @@ export default function SalmonSatelliteSchools({
   const fc = cfg.foregroundCrossingChance ?? 0.09;
   const yBase = Number.isFinite(Number(fish.schoolClusterYOffset))
     ? fish.schoolClusterYOffset
+    : 0;
+
+  const trailOn = !!bubbleTrailEnabled && scatterEnabled !== false;
+  const satMaxBubbles = trailOn
+    ? Math.min(120, Math.max(0, Math.round(Number(maxBubbles) * 0.5)))
     : 0;
 
   return (
@@ -80,10 +87,10 @@ export default function SalmonSatelliteSchools({
               scatterDuration={scatterDuration}
               scatterRecoverySpeed={scatterRecoverySpeed}
               chainReactionChance={chainReactionChance * 0.4}
-              bubbleTrailEnabled={false}
+              bubbleTrailEnabled={trailOn}
               bubbleSpawnRate={bubbleSpawnRate}
               bubbleLifetime={bubbleLifetime}
-              maxBubbles={0}
+              maxBubbles={satMaxBubbles}
               lightBeam={null}
               clusterAnchorY={anchorY}
               heroDepthCue={mergedDepthCue}

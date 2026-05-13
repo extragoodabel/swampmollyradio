@@ -124,6 +124,15 @@ canvas:active {
   border: 1px solid rgba(100, 160, 200, 0.25);
 }
 
+/* Underwater murk for first-load reveal + world switch (above canvas & vignette). */
+.world-atmosphere {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+  will-change: opacity;
+}
+
 /* Soft palette bridge between atmosphere modes (above canvas, under chrome). */
 .theme-crossfade {
   position: fixed;

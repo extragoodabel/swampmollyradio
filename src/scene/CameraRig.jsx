@@ -74,6 +74,19 @@ function clampPositionWithVelocity(pos, vel, min, max) {
   }
 }
 
+/** World up — two-finger vertical pan translates along Y, not tilt-derived camera up. */
+const _worldUp = new THREE.Vector3(0, 1, 0);
+
+/**
+ * Pinch spread (pixels / frame, smoothed) → same impulse lane as wheel, ~9× stronger
+ * than the old coefficient so mobile can traverse the aquarium.
+ */
+const TOUCH_PINCH_TO_IMPULSE = 0.082;
+/** Midpoint drag (pixels this frame) → drift velocity, world-right + world-Y. */
+const TOUCH_PAN_PIXEL_TO_VEL = 0.034;
+const TOUCH_MAX_PINCH_IMPULSE = 1.35;
+const TOUCH_MAX_PAN_VEL_STEP = 0.85;
+
 /**
  * Underwater camera rig.
  *
@@ -144,7 +157,6 @@ export default function CameraRig({
   const quatScratch = useRef(new THREE.Quaternion());
   const forwardScratch = useRef(new THREE.Vector3());
   const rightScratch = useRef(new THREE.Vector3());
-  const upScratch = useRef(new THREE.Vector3());
   const boundsMinScratch = useRef(new THREE.Vector3());
   const boundsMaxScratch = useRef(new THREE.Vector3());
 
@@ -169,8 +181,12 @@ export default function CameraRig({
     pinchSm: 0,
     panVx: 0,
     panVy: 0,
-    dbgAccum: 0,
     lastRawPinch: 0,
+  });
+  const touchDebugRef = useRef({
+    pendingTwoFinger: null,
+    lastWallLogTwoFinger: 0,
+    lastWallLogRotate: 0,
   });
   const windowListenersOnRef = useRef(false);
 
@@ -555,7 +571,7 @@ export default function CameraRig({
         mt.lastCx = cx;
         mt.lastCy = cy;
 
-        const pinchK = Math.min(1, dd * 11);
+        const pinchK = Math.min(1, dd * 9);
         mt.pinchSm += (rawPinch - mt.pinchSm) * pinchK;
         const panK = Math.min(1, dd * 10);
         const panVxInst = panDx / Math.max(dd, 0.0001);
@@ -567,18 +583,38 @@ export default function CameraRig({
         quatScratch.current.setFromEuler(eulerScratch.current);
         forwardScratch.current.set(0, 0, -1).applyQuaternion(quatScratch.current);
         rightScratch.current.set(1, 0, 0).applyQuaternion(quatScratch.current);
-        upScratch.current.set(0, 1, 0).applyQuaternion(quatScratch.current);
 
-        const baseImpulse = -mt.pinchSm * 0.009 * p.scrollDepthStrength;
-        const resisted =
-          baseImpulse /
+        const panMag = Math.abs(panDx) + Math.abs(panDy);
+        const pinchDominant =
+          Math.abs(rawPinch) > panMag * 0.42 + 0.25;
+        const gestureMode = pinchDominant ? 'pinch-drift' : 'two-finger-drift';
+
+        /**
+         * Pinch out (finger spread, rawPinch > 0) → move forward along look
+         * direction (same polarity as “swim into the scene” expectation).
+         * Sign is opposite legacy pinch delta→impulse mapping (wheel uses
+         * −deltaY intentionally for desktop only).
+         */
+        const pinchImpulse = clamp(
+          mt.pinchSm *
+            TOUCH_PINCH_TO_IMPULSE *
+            p.scrollDepthStrength,
+          -TOUCH_MAX_PINCH_IMPULSE,
+          TOUCH_MAX_PINCH_IMPULSE,
+        );
+        const resistedPinch =
+          pinchImpulse /
           (1 + driftVelocity.current.length() * p.swimImpulseDamp);
-        driftVelocity.current.addScaledVector(forwardScratch.current, resisted);
 
-        const panBoost =
-          0.00009 * p.scrollDepthStrength * Math.min(1.35, dd * 55);
-        driftVelocity.current.addScaledVector(rightScratch.current, mt.panVx * panBoost);
-        driftVelocity.current.addScaledVector(upScratch.current, -mt.panVy * panBoost);
+        const kPan = TOUCH_PAN_PIXEL_TO_VEL * p.scrollDepthStrength;
+        let rightAmt = panDx * kPan;
+        let upAmt = -panDy * kPan;
+        rightAmt = clamp(rightAmt, -TOUCH_MAX_PAN_VEL_STEP, TOUCH_MAX_PAN_VEL_STEP);
+        upAmt = clamp(upAmt, -TOUCH_MAX_PAN_VEL_STEP, TOUCH_MAX_PAN_VEL_STEP);
+
+        driftVelocity.current.addScaledVector(forwardScratch.current, resistedPinch);
+        driftVelocity.current.addScaledVector(rightScratch.current, rightAmt);
+        driftVelocity.current.addScaledVector(_worldUp, upAmt);
 
         const cap = p.swimMaxSpeed;
         if (driftVelocity.current.length() > cap) {
@@ -586,32 +622,25 @@ export default function CameraRig({
         }
 
         if (AQ_TOUCH_DEBUG) {
-          mt.dbgAccum += dd;
-          if (mt.dbgAccum > 0.4) {
-            mt.dbgAccum = 0;
-            console.info('[aqtouchdebug]', {
-              activeTouches: tp.size,
-              gestureMode: 'pinch+twoFingerPan',
-              pinchDelta: rawPinch,
-              pinchSmoothed: mt.pinchSm,
-              panVx: mt.panVx,
-              panVy: mt.panVy,
-              driftSpeed: driftVelocity.current.length(),
-              ignoredUi: false,
-            });
-          }
+          const posBefore = rigPosition.current.clone();
+          touchDebugRef.current.pendingTwoFinger = {
+            activeTouches: tp.size,
+            gestureMode,
+            pinchDelta: rawPinch,
+            pinchSmoothed: mt.pinchSm,
+            forwardBackImpulse: resistedPinch,
+            upDownImpulse: upAmt,
+            leftRightImpulse: rightAmt,
+            panMidpointDelta: { x: panDx, y: panDy },
+            panSmoothedVel: { x: mt.panVx, y: mt.panVy },
+            driftSpeed: driftVelocity.current.length(),
+            rigPositionBefore: { x: posBefore.x, y: posBefore.y, z: posBefore.z },
+            ignoredUi: false,
+          };
         }
       }
-    } else if (AQ_TOUCH_DEBUG && tp.size === 1 && dragState.current.active) {
-      mt.dbgAccum += dd;
-      if (mt.dbgAccum > 0.65) {
-        mt.dbgAccum = 0;
-        console.info('[aqtouchdebug]', {
-          activeTouches: tp.size,
-          gestureMode: 'rotate',
-          ignoredUi: false,
-        });
-      }
+    } else {
+      touchDebugRef.current.pendingTwoFinger = null;
     }
 
     if (!dragState.current.active) {
@@ -688,6 +717,40 @@ export default function CameraRig({
       boundsMinScratch.current,
       boundsMaxScratch.current,
     );
+
+    if (AQ_TOUCH_DEBUG) {
+      const td = touchDebugRef.current;
+      if (td.pendingTwoFinger) {
+        const w = performance.now();
+        if (w - td.lastWallLogTwoFinger > 320) {
+          td.lastWallLogTwoFinger = w;
+          const snap = td.pendingTwoFinger;
+          console.info('[aqtouchdebug]', {
+            ...snap,
+            rigPositionAfter: {
+              x: rigPosition.current.x,
+              y: rigPosition.current.y,
+              z: rigPosition.current.z,
+            },
+          });
+        }
+      }
+      if (
+        tp.size === 1 &&
+        dragState.current.active &&
+        !beaconNavSuspendedRef.current
+      ) {
+        const w = performance.now();
+        if (w - td.lastWallLogRotate > 650) {
+          td.lastWallLogRotate = w;
+          console.info('[aqtouchdebug]', {
+            activeTouches: 1,
+            gestureMode: 'rotate',
+            ignoredUi: false,
+          });
+        }
+      }
+    }
 
     const touchNavActive = touchPointersRef.current.size > 0;
     const hoverMult =

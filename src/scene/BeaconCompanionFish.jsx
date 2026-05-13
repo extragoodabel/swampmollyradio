@@ -8,6 +8,8 @@ import WebpFishSchool from './WebpFishSchool.jsx';
  */
 
 const SCHOOL_DEFAULTS = {
+  // Baseline when `config` omits keys; Scene merges Leva scatter/bubble props
+  // into `beaconCompanionFish` so the panel matches other schools.
   count: 7,
   clusterCount: 4,
   seed: 7721,

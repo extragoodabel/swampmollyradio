@@ -21,6 +21,7 @@
  * - `?aqcardebug=1` — Swamp submerged cars: distance + headlight anchor logs; optional marker dots.
  * - `?aqcompaniondebug=1` — companion schools: mount diagnostics + slightly boosted visibility.
  * - `?aqtouchdebug=1` — CameraRig: touch pinch/pan / rotate gesture diagnostics (console).
+ * - `?aqnotransition=1` — skip underwater reveal + world-switch murk (debug).
  */
 
 import { THEME_VER_KEY } from '../theme/salmonRecovery.js';
@@ -116,6 +117,11 @@ export const AQ_SALMON_EMERGENCY =
 export const AQ_IGNORE_THEME_STORAGE =
   params.has('aqignorestorage') ||
   import.meta.env.VITE_AQ_IGNORE_THEME_STORAGE === '1';
+
+/** Skip first-load reveal and theme-switch murk transitions (`?aqnotransition=1`). */
+export const AQ_NO_TRANSITION =
+  params.has('aqnotransition') ||
+  import.meta.env.VITE_AQ_NO_TRANSITION === '1';
 
 /**
  * Call from `main.jsx` before `createRoot` so purged keys do not replay into the first render.
