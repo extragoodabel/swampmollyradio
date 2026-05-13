@@ -2,7 +2,7 @@
  * URL / env toggles for emergency stabilization (no artistic tuning).
  *
  * - `?aqrecover=1` — lighter atmosphere / stabilization only (typography + beacon stay on)
- * - `?aqdebug=1` — show engine HUD (frame count, camera, deltas)
+ * - `?aqdebug=1` — on-screen engine HUD (frame tick, camera, deltas); not on by DEV alone
  * - `?noletters=1` — skip FloatingLetters only (beacon falls back to standalone orb)
  * - `VITE_AQ_SKIP_TYPOGRAPHY=1` — build-time: never mount troika text
  * - `?aqtypetest=1` — huge TEST TYPOGRAPHY plane in front of camera (proves canvas mesh path)
@@ -20,6 +20,7 @@
  * - `?aqorbdebug=1` — orb/beacon mount + tap diagnostics (console).
  * - `?aqcardebug=1` — Swamp submerged cars: distance + headlight anchor logs; optional marker dots.
  * - `?aqcompaniondebug=1` — companion schools: mount diagnostics + slightly boosted visibility.
+ * - `?aqtouchdebug=1` — CameraRig: touch pinch/pan / rotate gesture diagnostics (console).
  */
 
 import { THEME_VER_KEY } from '../theme/salmonRecovery.js';
@@ -34,6 +35,10 @@ export const AQ_DEBUG =
   import.meta.env.DEV ||
   import.meta.env.VITE_AQ_DEBUG === '1' ||
   params.has('aqdebug');
+
+/** Fixed DOM engine HUD (`AquariumEngineDebug`) — explicit only; never implied by DEV. */
+export const AQ_ENGINE_HUD =
+  import.meta.env.VITE_AQ_DEBUG === '1' || params.has('aqdebug');
 
 export const AQ_RECOVER =
   import.meta.env.VITE_AQ_RECOVER === '1' || params.has('aqrecover');
@@ -85,6 +90,11 @@ export const AQ_CAR_DEBUG =
 export const AQ_COMPANION_DEBUG =
   params.has('aqcompaniondebug') ||
   import.meta.env.VITE_AQ_COMPANION_DEBUG === '1';
+
+/** Mobile / touch: pinch-to-drift + gesture mode logging (`?aqtouchdebug=1`). */
+export const AQ_TOUCH_DEBUG =
+  params.has('aqtouchdebug') ||
+  import.meta.env.VITE_AQ_TOUCH_DEBUG === '1';
 
 /**
  * Verbose theme click / persistence logging (also enabled whenever AQ_THEME_DEBUG is on).

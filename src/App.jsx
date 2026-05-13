@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Leva } from 'leva';
 import Scene from './scene/Scene.jsx';
@@ -80,6 +86,49 @@ function ThemedShell() {
   const [sceneGeneration, setSceneGeneration] = useState(0);
   const sceneFailureAttemptsRef = useRef(0);
   const [sceneCrashReport, setSceneCrashReport] = useState(null);
+  /** Discreet tuning panel (Leva): both desktop + mobile default to closed. */
+  const [levaOpen, setLevaOpen] = useState(false);
+  const levaToggleRef = useRef(null);
+  const [levaTitlePos, setLevaTitlePos] = useState({ x: 0, y: 54 });
+
+  const syncLevaPanelDock = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const vw = window.innerWidth;
+    const panelW = Math.min(292, vw - 20);
+    /** Matches Leva `StyledRoot` when `fill` is false: `top` / `right` on the panel root. */
+    const levaDefaultTop = 10;
+    const levaDefaultRightInset = 10;
+    const gapBelowToggle = 8;
+    const minLeftEdge = 10;
+
+    const el = levaToggleRef.current;
+    if (!el) {
+      setLevaTitlePos({ x: 0, y: 64 - levaDefaultTop });
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    /** Horizontal: `titleBar.position` is applied as `translate3d(x,y,0)` on top of fixed `right: 10px`. */
+    let x = Math.round(rect.right - (vw - levaDefaultRightInset));
+    const y = Math.round(rect.bottom + gapBelowToggle - levaDefaultTop);
+
+    const leftEdge =
+      vw - levaDefaultRightInset - panelW + x;
+    if (leftEdge < minLeftEdge) {
+      x += Math.round(minLeftEdge - leftEdge);
+    }
+
+    setLevaTitlePos({ x, y });
+  }, []);
+
+  useLayoutEffect(() => {
+    syncLevaPanelDock();
+  }, [syncLevaPanelDock, levaOpen]);
+
+  useEffect(() => {
+    syncLevaPanelDock();
+    window.addEventListener('resize', syncLevaPanelDock);
+    return () => window.removeEventListener('resize', syncLevaPanelDock);
+  }, [syncLevaPanelDock]);
 
   useEffect(() => {
     sceneFailureAttemptsRef.current = 0;
@@ -176,6 +225,7 @@ function ThemedShell() {
             display: 'block',
             zIndex: 0,
             touchAction: 'none',
+            overscrollBehavior: 'none',
           }}
           dpr={[1, 1.75]}
           gl={{
@@ -201,14 +251,87 @@ function ThemedShell() {
             onSceneFatal={handleSceneFatal}
           />
         </Canvas>
+      <button
+        ref={levaToggleRef}
+        type="button"
+        className="aquarium-leva-toggle"
+        onClick={() => setLevaOpen((v) => !v)}
+        aria-expanded={levaOpen}
+        aria-label={
+          levaOpen ? 'Hide tuning controls' : 'Open tuning controls'
+        }
+      >
+        <span className="aquarium-leva-toggle__glyph" aria-hidden>
+          {levaOpen ? '×' : '≋'}
+        </span>
+      </button>
       <Leva
-        collapsed
-        titleBar={{ title: 'Aquarium controls', drag: true }}
+        hidden={!levaOpen}
+        /** LevaCore hides the root with `display:none` until store paths exist unless this is set. */
+        neverHide
+        flat
+        hideCopyButton
+        collapsed={false}
+        oneLineLabels={false}
+        titleBar={{
+          title: 'Tuning',
+          drag: true,
+          filter: true,
+          position: levaTitlePos,
+        }}
         theme={{
           colors: {
-            accent1: '#7cc3e8',
+            elevation1: 'rgba(4, 14, 26, 0.9)',
+            elevation2: 'rgba(8, 24, 40, 0.92)',
+            elevation3: 'rgba(12, 32, 50, 0.95)',
+            accent1: '#7ec8ec',
             accent2: '#5fa3c8',
-            highlight1: '#a8c8d8',
+            accent3: '#4a88b0',
+            highlight1: '#aacfe2',
+            highlight2: '#8ab8d4',
+            highlight3: '#6a9cb8',
+            vivid1: '#9fd4ff',
+            folderWidgetColor: 'rgba(120, 185, 220, 0.42)',
+            folderTextColor: 'rgba(195, 228, 245, 0.78)',
+            toolTipBackground: 'rgba(5, 16, 28, 0.96)',
+            toolTipText: 'rgba(230, 245, 255, 0.92)',
+          },
+          radii: {
+            xs: '3px',
+            sm: '8px',
+            lg: '11px',
+          },
+          space: {
+            xs: '2px',
+            sm: '4px',
+            md: '6px',
+            rowGap: '4px',
+            colGap: '6px',
+          },
+          fontSizes: {
+            root: '10px',
+            toolTip: '10px',
+          },
+          sizes: {
+            rootWidth: 'min(292px, calc(100vw - 20px))',
+            titleBarHeight: '26px',
+            rowHeight: '22px',
+            controlWidth: 'min(132px, 42vw)',
+            numberInputMinWidth: '36px',
+            scrubberWidth: '56px',
+            scrubberHeight: '10px',
+          },
+          shadows: {
+            level1: '0 2px 14px rgba(0, 0, 0, 0.28)',
+            level2: '0 4px 22px rgba(0, 0, 0, 0.38)',
+          },
+          borderWidths: {
+            root: '1px',
+            input: '1px',
+            focus: '1px',
+            hover: '1px',
+            active: '1px',
+            folder: '1px',
           },
         }}
       />
@@ -262,7 +385,8 @@ function ThemedShell() {
               <code>?aqswampkill=car1,haze,…</code>,{' '}
               <code>?aquariumtheme=…</code>, <code>?aqclearsaved=1</code>,{' '}
               <code>?aqignorestorage=1</code>. Salmon kills:{' '}
-              <code>?aqsalmonkill=vault,backdrop,…</code>. Logs:{' '}
+              <code>?aqsalmonkill=vault,backdrop,whaleSkeleton,whale,…</code>,{' '}
+              <code>?aqwhaledebug=1</code>. Logs:{' '}
               <code>?aqthemeswitchlog=1</code>.
             </p>
             <button

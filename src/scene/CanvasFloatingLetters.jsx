@@ -1,17 +1,22 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { Suspense, useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import AmbientRadio from './AmbientRadio.jsx';
+import { resolveBeaconVisual } from './AmbientRadio.jsx';
 import { resolveRadioSlotIndex } from '../theme/themes.js';
-import { computeLetterSlots } from './letterLayout.js';
-import { LetterRadioSlot } from './FloatingLetters.jsx';
+import { computeLetterSlots, normalizeFloatingPhrase } from './letterLayout.js';
+import {
+  LetterRadioSlot,
+  TypographicDistantBeacon,
+} from './FloatingLetters.jsx';
+import BeaconCompanionFish from './BeaconCompanionFish.jsx';
 import { AQ_TYPO_DEBUG_LOG } from '../debug/aquariumRecovery.js';
 import {
   typographyFillHex,
   typographyHighlightColor,
 } from './typographyPalette.js';
 
-/** Bypass camera-distance readability curve so the embedded orb stays visible while debugging. */
+/** Match `FloatingLetters` embedded orb base scale. */
+const CANVAS_ORB_VISUAL_SCALE_MUL = 0.94;
 const NEUTRAL_ORB_READABILITY = {
   anchor: [0, 0, 0],
   readStart: 0,
@@ -70,13 +75,16 @@ function CanvasGlyph({
   opacity,
   shimmerStrength,
 }) {
+  const displayChar =
+    typeof char === 'string' && char !== ' ' ? char.toLocaleLowerCase('en-US') : char;
+
   const groupRef = useRef();
   const matRef = useRef();
   const baseRgb = useMemo(() => new THREE.Color(fillHex), [fillHex]);
 
   const map = useMemo(
-    () => makeGlyphTexture(char, fillHex, crestHex),
-    [char, fillHex, crestHex],
+    () => makeGlyphTexture(displayChar, fillHex, crestHex),
+    [displayChar, fillHex, crestHex],
   );
 
   useFrame((s) => {
@@ -180,6 +188,9 @@ export default function CanvasFloatingLetters({
   radioEmbedded = false,
   radioGlowIntensity = 1,
   beaconAtmosphere = null,
+  beaconVisual = null,
+  beaconPlacementResetKey = '',
+  beaconCompanionFish = null,
   typographyReadability: _typographyReadability,
   typographyTint = null,
   shimmerStrength = 0.55,
@@ -187,6 +198,8 @@ export default function CanvasFloatingLetters({
   /** Stronger Z clamp for recovery (keeps phrase in frustum). */
   safeClampZ = 3.8,
 }) {
+  const phrase = useMemo(() => normalizeFloatingPhrase(text), [text]);
+
   const mergedFloatLayout = useMemo(
     () => ({
       sequentialDepthShare: 0.52,
@@ -213,14 +226,14 @@ export default function CanvasFloatingLetters({
   }, [fillHex, highlight]);
 
   const radioSlotIndex = useMemo(
-    () => resolveRadioSlotIndex(text, radioSlot),
-    [text, radioSlot],
+    () => resolveRadioSlotIndex(phrase, radioSlot),
+    [phrase, radioSlot],
   );
 
   const layout = useMemo(
     () =>
       computeLetterSlots(
-        text,
+        phrase,
         spacing,
         depthSpread,
         rowGapMul,
@@ -231,7 +244,7 @@ export default function CanvasFloatingLetters({
         { maxAbsZ: safeClampZ },
       ),
     [
-      text,
+      phrase,
       spacing,
       depthSpread,
       rowGapMul,
@@ -243,6 +256,22 @@ export default function CanvasFloatingLetters({
     ],
   );
 
+  const beaconSlotAnchorRef = useRef(null);
+  const beaconModRef = useRef({ beam: 1, haze: 1, shimmer: 1 });
+  const beaconVisualResolved = useMemo(
+    () => resolveBeaconVisual(beaconVisual),
+    [beaconVisual],
+  );
+  const beaconTypographyScale = useMemo(
+    () =>
+      (scale / 0.3) *
+      CANVAS_ORB_VISUAL_SCALE_MUL *
+      beaconVisualResolved.typographyScaleMul,
+    [scale, beaconVisualResolved.typographyScaleMul],
+  );
+
+  const beaconCompanionGroupRef = useRef(null);
+
   useEffect(() => {
     if (!AQ_TYPO_DEBUG_LOG) return;
     const readable = layout.filter((s) => !/\s/.test(s.char)).length;
@@ -251,62 +280,91 @@ export default function CanvasFloatingLetters({
       .slice(0, 6)
       .map(({ baseX, baseY, baseZ }) => ({ x: baseX, y: baseY, z: baseZ }));
     console.info('[aquarium] CanvasFloatingLetters mounted', {
-      phrase: text,
-      themeChars: text.length,
+      phrase,
+      themeChars: phrase.length,
       slotCount: layout.length,
       glyphSlots: readable,
       radioSlotIndex,
       positionSamples: samples,
     });
-  }, [text, layout, radioSlotIndex]);
+  }, [phrase, layout, radioSlotIndex]);
 
   return (
-    <group>
-      {layout.map((l, i) => {
-        if (/\s/.test(l.char)) return null;
+    <>
+      <group>
+        {layout.map((l, i) => {
+          if (/\s/.test(l.char)) return null;
 
-        const useRadioGlyph =
-          radioEmbedded && radioSlotIndex != null && i === radioSlotIndex;
+          const useRadioGlyph =
+            radioEmbedded && radioSlotIndex != null && i === radioSlotIndex;
 
-        if (useRadioGlyph) {
+          if (useRadioGlyph) {
+            return (
+              <LetterRadioSlot
+                ref={beaconSlotAnchorRef}
+                key={i}
+                baseX={l.baseX}
+                baseY={l.baseY}
+                baseZ={l.baseZ}
+                phase={l.phase}
+                scale={scale}
+                opacity={opacity}
+                floatStrength={floatStrength}
+                shimmerStrength={shimmerStrength}
+                murkTint={fillHex}
+                glowIntensity={radioGlowIntensity}
+                beam={beam}
+                beaconAtmosphere={beaconAtmosphere}
+                typographyReadability={NEUTRAL_ORB_READABILITY}
+                modRef={beaconModRef}
+              />
+            );
+          }
+
           return (
-            <LetterRadioSlot
+            <CanvasGlyph
               key={i}
+              char={l.char}
               baseX={l.baseX}
               baseY={l.baseY}
               baseZ={l.baseZ}
               phase={l.phase}
               scale={scale}
-              opacity={opacity}
               floatStrength={floatStrength}
+              fillHex={fillHex}
+              crestHex={crestHex}
+              highlight={highlight}
+              opacity={opacity}
               shimmerStrength={shimmerStrength}
-              murkTint={fillHex}
-              glowIntensity={radioGlowIntensity}
-              beam={beam}
-              beaconAtmosphere={beaconAtmosphere}
-              typographyReadability={NEUTRAL_ORB_READABILITY}
             />
           );
-        }
-
-        return (
-          <CanvasGlyph
-            key={i}
-            char={l.char}
-            baseX={l.baseX}
-            baseY={l.baseY}
-            baseZ={l.baseZ}
-            phase={l.phase}
-            scale={scale}
-            floatStrength={floatStrength}
-            fillHex={fillHex}
-            crestHex={crestHex}
-            highlight={highlight}
-            opacity={opacity}
-            shimmerStrength={shimmerStrength}
+        })}
+      </group>
+      {radioEmbedded && radioSlotIndex != null ? (
+        <>
+          {beaconCompanionFish ? (
+            <group ref={beaconCompanionGroupRef}>
+              <Suspense fallback={null}>
+                <BeaconCompanionFish config={beaconCompanionFish} />
+              </Suspense>
+            </group>
+          ) : null}
+          <TypographicDistantBeacon
+            anchorRef={beaconSlotAnchorRef}
+            modRef={beaconModRef}
+            typographyScale={beaconTypographyScale}
+            murkTint={fillHex}
+            glowIntensity={radioGlowIntensity}
+            beaconAtmosphere={beaconAtmosphere}
+            beaconVisual={beaconVisual}
+            placementResetKey={beaconPlacementResetKey}
+            companionFollowGroupRef={
+              beaconCompanionFish ? beaconCompanionGroupRef : null
+            }
+            enabled
           />
-        );
-      })}
-    </group>
+        </>
+      ) : null}
+    </>
   );
 }

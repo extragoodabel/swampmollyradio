@@ -2,6 +2,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useRadio } from '../audio/RadioContext.jsx';
+import { AQ_TOUCH_DEBUG } from '../debug/aquariumRecovery.js';
 
 function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
@@ -142,6 +143,8 @@ export default function CameraRig({
   const eulerScratch = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
   const quatScratch = useRef(new THREE.Quaternion());
   const forwardScratch = useRef(new THREE.Vector3());
+  const rightScratch = useRef(new THREE.Vector3());
+  const upScratch = useRef(new THREE.Vector3());
   const boundsMinScratch = useRef(new THREE.Vector3());
   const boundsMaxScratch = useRef(new THREE.Vector3());
 
@@ -154,6 +157,22 @@ export default function CameraRig({
     lastVx: 0,
     lastVy: 0,
   });
+
+  /** Active coarse pointers (touch / pen) on the canvas — mouse uses `dragState` only. */
+  const touchPointersRef = useRef(new Map());
+  /** Two-finger pinch / pan — integrated in `useFrame` so both touches contribute once per frame. */
+  const multiTouchRef = useRef({
+    inited: false,
+    lastDist: 0,
+    lastCx: 0,
+    lastCy: 0,
+    pinchSm: 0,
+    panVx: 0,
+    panVy: 0,
+    dbgAccum: 0,
+    lastRawPinch: 0,
+  });
+  const windowListenersOnRef = useRef(false);
 
   const prevAnchorKey = useRef(anchorResetKey);
 
@@ -264,10 +283,37 @@ export default function CameraRig({
 
     const radPerPixelBase = Math.PI / 2400;
 
-    const removeWindowDragListeners = () => {
+    const removeWindowPointerLayer = () => {
+      if (!windowListenersOnRef.current) return;
+      windowListenersOnRef.current = false;
       window.removeEventListener('pointermove', onWindowPointerMove, true);
-      window.removeEventListener('pointerup', onWindowPointerEnd, true);
-      window.removeEventListener('pointercancel', onWindowPointerEnd, true);
+      window.removeEventListener('pointerup', onWindowPointerUp, true);
+      window.removeEventListener('pointercancel', onWindowPointerUp, true);
+    };
+
+    const addWindowPointerLayer = () => {
+      if (windowListenersOnRef.current) return;
+      windowListenersOnRef.current = true;
+      window.addEventListener('pointermove', onWindowPointerMove, true);
+      window.addEventListener('pointerup', onWindowPointerUp, true);
+      window.addEventListener('pointercancel', onWindowPointerUp, true);
+    };
+
+    const finishMouseDrag = (e) => {
+      removeWindowPointerLayer();
+      try {
+        el.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+      el.style.cursor = 'grab';
+      const d = dragState.current;
+      d.active = false;
+
+      const stale = performance.now() - d.lastTime;
+      const p = propsRef.current;
+      const vx = stale > 100 ? 0 : d.lastVx;
+      const vy = stale > 100 ? 0 : d.lastVy;
+      yawVelocity.current = vx * p.inertiaStrength;
+      pitchVelocity.current = vy * p.inertiaStrength;
     };
 
     const applyPointerDelta = (e) => {
@@ -298,70 +344,179 @@ export default function CameraRig({
     };
 
     const onWindowPointerMove = (e) => {
+      const tp = touchPointersRef.current;
+      if (tp.has(e.pointerId)) {
+        tp.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+
+      if (e.pointerType === 'mouse') {
+        const d = dragState.current;
+        if (d.active && e.pointerId === d.pointerId) {
+          applyPointerDelta(e);
+        }
+        return;
+      }
+
+      if (tp.size >= 2) {
+        return;
+      }
+
       const d = dragState.current;
-      if (!d.active || e.pointerId !== d.pointerId) return;
-      applyPointerDelta(e);
+      if (d.active && e.pointerId === d.pointerId && tp.size <= 1) {
+        applyPointerDelta(e);
+      }
     };
 
-    const onWindowPointerEnd = (e) => {
-      const d = dragState.current;
-      if (!d.active || e.pointerId !== d.pointerId) return;
-      removeWindowDragListeners();
-      try {
-        el.releasePointerCapture(e.pointerId);
-      } catch (_) {}
-      el.style.cursor = 'grab';
-      d.active = false;
+    const onWindowPointerUp = (e) => {
+      if (e.pointerType === 'mouse') {
+        const d = dragState.current;
+        if (d.active && e.pointerId === d.pointerId) {
+          finishMouseDrag(e);
+        }
+        return;
+      }
 
-      const stale = performance.now() - d.lastTime;
-      const p = propsRef.current;
-      const vx = stale > 100 ? 0 : d.lastVx;
-      const vy = stale > 100 ? 0 : d.lastVy;
-      yawVelocity.current = vx * p.inertiaStrength;
-      pitchVelocity.current = vy * p.inertiaStrength;
+      if (!touchPointersRef.current.has(e.pointerId)) return;
+
+      touchPointersRef.current.delete(e.pointerId);
+      multiTouchRef.current.inited = false;
+
+      if (touchPointersRef.current.size === 0) {
+        const d = dragState.current;
+        const stale = performance.now() - d.lastTime;
+        const pr = propsRef.current;
+        const vx = stale > 100 ? 0 : d.lastVx;
+        const vy = stale > 100 ? 0 : d.lastVy;
+        yawVelocity.current = vx * pr.inertiaStrength;
+        pitchVelocity.current = vy * pr.inertiaStrength;
+        dragState.current.active = false;
+        removeWindowPointerLayer();
+        el.style.cursor = 'grab';
+        try {
+          el.releasePointerCapture(e.pointerId);
+        } catch (_) {}
+        return;
+      }
+
+      if (touchPointersRef.current.size === 1) {
+        const [pid] = touchPointersRef.current.keys();
+        const pt = touchPointersRef.current.get(pid);
+        dragState.current.active = true;
+        dragState.current.pointerId = pid;
+        dragState.current.lastX = pt.x;
+        dragState.current.lastY = pt.y;
+        dragState.current.lastTime = performance.now();
+        dragState.current.lastVx = 0;
+        dragState.current.lastVy = 0;
+        yawVelocity.current = 0;
+        pitchVelocity.current = 0;
+        try {
+          el.setPointerCapture(pid);
+        } catch (_) {}
+        el.style.cursor = 'grabbing';
+      }
     };
 
     const onPointerDown = (e) => {
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
-      queueMicrotask(() => {
-        if (beaconNavSuspendedRef.current) return;
-        try {
-          el.setPointerCapture(e.pointerId);
-        } catch (_) {}
-        el.style.cursor = 'grabbing';
-        dragState.current = {
-          active: true,
-          pointerId: e.pointerId,
-          lastX: e.clientX,
-          lastY: e.clientY,
-          lastTime: performance.now(),
-          lastVx: 0,
-          lastVy: 0,
-        };
-        yawVelocity.current = 0;
-        pitchVelocity.current = 0;
+      if (e.target !== el) {
+        if (AQ_TOUCH_DEBUG) {
+          console.info('[aqtouchdebug] pointerdown ignored (target !== canvas)', {
+            ignoredUi: true,
+          });
+        }
+        return;
+      }
 
-        window.addEventListener('pointermove', onWindowPointerMove, true);
-        window.addEventListener('pointerup', onWindowPointerEnd, true);
-        window.addEventListener('pointercancel', onWindowPointerEnd, true);
+      if (e.pointerType === 'mouse') {
+        if (e.button !== 0) return;
+        queueMicrotask(() => {
+          if (beaconNavSuspendedRef.current) return;
+          try {
+            el.setPointerCapture(e.pointerId);
+          } catch (_) {}
+          el.style.cursor = 'grabbing';
+          dragState.current = {
+            active: true,
+            pointerId: e.pointerId,
+            lastX: e.clientX,
+            lastY: e.clientY,
+            lastTime: performance.now(),
+            lastVx: 0,
+            lastVy: 0,
+          };
+          yawVelocity.current = 0;
+          pitchVelocity.current = 0;
+          addWindowPointerLayer();
+        });
+        return;
+      }
+
+      if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
+
+      queueMicrotask(() => {
+        if (beaconNavSuspendedRef.current) {
+          if (AQ_TOUCH_DEBUG) {
+            console.info('[aqtouchdebug] touch ignored (beacon / orb captured first)', {
+              ignoredUi: false,
+            });
+          }
+          return;
+        }
+        touchPointersRef.current.set(e.pointerId, {
+          x: e.clientX,
+          y: e.clientY,
+        });
+        addWindowPointerLayer();
+
+        if (touchPointersRef.current.size === 1) {
+          try {
+            el.setPointerCapture(e.pointerId);
+          } catch (_) {}
+          el.style.cursor = 'grabbing';
+          dragState.current = {
+            active: true,
+            pointerId: e.pointerId,
+            lastX: e.clientX,
+            lastY: e.clientY,
+            lastTime: performance.now(),
+            lastVx: 0,
+            lastVy: 0,
+          };
+          yawVelocity.current = 0;
+          pitchVelocity.current = 0;
+        } else if (touchPointersRef.current.size === 2) {
+          dragState.current.active = false;
+          for (const pid of touchPointersRef.current.keys()) {
+            try {
+              el.releasePointerCapture(pid);
+            } catch (_) {}
+          }
+          el.style.cursor = 'grab';
+          yawVelocity.current = 0;
+          pitchVelocity.current = 0;
+          multiTouchRef.current.inited = false;
+        }
       });
     };
 
-    const onPointerEnd = (e) => {
-      onWindowPointerEnd(e);
+    const onPointerEndLocal = (e) => {
+      onWindowPointerUp(e);
     };
 
     el.addEventListener('pointerdown', onPointerDown);
-    el.addEventListener('pointerup', onPointerEnd);
-    el.addEventListener('pointercancel', onPointerEnd);
+    el.addEventListener('pointerup', onPointerEndLocal);
+    el.addEventListener('pointercancel', onPointerEndLocal);
 
     return () => {
-      removeWindowDragListeners();
+      removeWindowPointerLayer();
+      touchPointersRef.current.clear();
+      multiTouchRef.current.inited = false;
+      dragState.current.active = false;
       el.style.cursor = '';
       el.style.touchAction = '';
       el.removeEventListener('pointerdown', onPointerDown);
-      el.removeEventListener('pointerup', onPointerEnd);
-      el.removeEventListener('pointercancel', onPointerEnd);
+      el.removeEventListener('pointerup', onPointerEndLocal);
+      el.removeEventListener('pointercancel', onPointerEndLocal);
     };
   }, [gl, beaconNavSuspendedRef]);
 
@@ -371,6 +526,93 @@ export default function CameraRig({
     const p = propsRef.current;
     const idle = n(idleSway, 1);
     const hoverStr = n(p.hoverParallaxStrength, 1);
+
+    const tp = touchPointersRef.current;
+    const mt = multiTouchRef.current;
+
+    if (!beaconNavSuspendedRef.current && tp.size >= 2) {
+      const pts = [...tp.values()];
+      const a = pts[0];
+      const b = pts[1];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      const cx = (a.x + b.x) * 0.5;
+      const cy = (a.y + b.y) * 0.5;
+
+      if (!mt.inited) {
+        mt.lastDist = dist;
+        mt.lastCx = cx;
+        mt.lastCy = cy;
+        mt.inited = true;
+        mt.pinchSm = 0;
+        mt.panVx = 0;
+        mt.panVy = 0;
+      } else {
+        const rawPinch = dist - mt.lastDist;
+        mt.lastDist = dist;
+        mt.lastRawPinch = rawPinch;
+        const panDx = cx - mt.lastCx;
+        const panDy = cy - mt.lastCy;
+        mt.lastCx = cx;
+        mt.lastCy = cy;
+
+        const pinchK = Math.min(1, dd * 11);
+        mt.pinchSm += (rawPinch - mt.pinchSm) * pinchK;
+        const panK = Math.min(1, dd * 10);
+        const panVxInst = panDx / Math.max(dd, 0.0001);
+        const panVyInst = panDy / Math.max(dd, 0.0001);
+        mt.panVx += (panVxInst - mt.panVx) * panK;
+        mt.panVy += (panVyInst - mt.panVy) * panK;
+
+        eulerScratch.current.set(pitch.current, yaw.current, 0, 'YXZ');
+        quatScratch.current.setFromEuler(eulerScratch.current);
+        forwardScratch.current.set(0, 0, -1).applyQuaternion(quatScratch.current);
+        rightScratch.current.set(1, 0, 0).applyQuaternion(quatScratch.current);
+        upScratch.current.set(0, 1, 0).applyQuaternion(quatScratch.current);
+
+        const baseImpulse = -mt.pinchSm * 0.009 * p.scrollDepthStrength;
+        const resisted =
+          baseImpulse /
+          (1 + driftVelocity.current.length() * p.swimImpulseDamp);
+        driftVelocity.current.addScaledVector(forwardScratch.current, resisted);
+
+        const panBoost =
+          0.00009 * p.scrollDepthStrength * Math.min(1.35, dd * 55);
+        driftVelocity.current.addScaledVector(rightScratch.current, mt.panVx * panBoost);
+        driftVelocity.current.addScaledVector(upScratch.current, -mt.panVy * panBoost);
+
+        const cap = p.swimMaxSpeed;
+        if (driftVelocity.current.length() > cap) {
+          driftVelocity.current.setLength(cap);
+        }
+
+        if (AQ_TOUCH_DEBUG) {
+          mt.dbgAccum += dd;
+          if (mt.dbgAccum > 0.4) {
+            mt.dbgAccum = 0;
+            console.info('[aqtouchdebug]', {
+              activeTouches: tp.size,
+              gestureMode: 'pinch+twoFingerPan',
+              pinchDelta: rawPinch,
+              pinchSmoothed: mt.pinchSm,
+              panVx: mt.panVx,
+              panVy: mt.panVy,
+              driftSpeed: driftVelocity.current.length(),
+              ignoredUi: false,
+            });
+          }
+        }
+      }
+    } else if (AQ_TOUCH_DEBUG && tp.size === 1 && dragState.current.active) {
+      mt.dbgAccum += dd;
+      if (mt.dbgAccum > 0.65) {
+        mt.dbgAccum = 0;
+        console.info('[aqtouchdebug]', {
+          activeTouches: tp.size,
+          gestureMode: 'rotate',
+          ignoredUi: false,
+        });
+      }
+    }
 
     if (!dragState.current.active) {
       if (beaconNavSuspendedRef.current) {
@@ -447,8 +689,13 @@ export default function CameraRig({
       boundsMaxScratch.current,
     );
 
+    const touchNavActive = touchPointersRef.current.size > 0;
     const hoverMult =
-      dragState.current.active || beaconNavSuspendedRef.current ? 0.2 : 1;
+      dragState.current.active ||
+      touchNavActive ||
+      beaconNavSuspendedRef.current
+        ? 0.2
+        : 1;
     const px = hoverParallax.x * hoverStr * hoverMult;
     const py = hoverParallax.y * hoverStr * hoverMult;
 

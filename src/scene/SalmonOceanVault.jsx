@@ -65,7 +65,7 @@ const FRAG = /* glsl */ `
     vec3 dir = normalize(vWorldPos - uCameraPos);
     float up = dir.y;
 
-    float abyss = smoothstep(0.24, -0.88, up);
+    float abyss = 1.0 - smoothstep(-0.92, 0.06, up);
     vec3 col = mix(uMidColor, uDeepColor, abyss * abyss * (3.0 - 2.0 * abyss));
 
     // Horizon belt — very soft mid-water lift (avoid a crisp “band”).
@@ -111,19 +111,28 @@ const FRAG = /* glsl */ `
     col += uWarmPeach * pow(zenith, 1.9) * 0.22 * uOverheadGlow;
     col += uAquaSheen * smoothstep(0.35, 0.94, up) * (0.12 + rake * 0.22);
 
-    // --- Peripheral: infinite dark ocean — wrap light into depth without a hard “wall”.
+    // --- Peripheral: rich side abyss (deep blue); down-vector stays darker via low below weight.
     float horiz = length(dir.xz);
-    float hDark = smoothstep(0.26, 1.12, horiz);
-    float below = smoothstep(0.2, -0.82, up);
-    float blendW = clamp(hDark * 0.44 + below * 0.4, 0.0, 1.0);
-    blendW = pow(blendW, 0.84);
-    vec3 farWater = mix(uDeepColor, uMidColor * vec3(0.52, 0.55, 0.62), 0.4);
-    farWater = mix(farWater, uDeepColor * vec3(0.55, 0.58, 0.64), 0.52);
-    col = mix(col, farWater, blendW * 0.55);
+    float hDark = smoothstep(0.2, 1.05, horiz);
+    float below = 1.0 - smoothstep(-0.84, 0.16, up);
+    float blendW = clamp(hDark * 0.74 + below * 0.09, 0.0, 1.0);
+    blendW = pow(blendW, 0.78);
+    vec3 farWater = mix(uDeepColor, uMidColor * vec3(0.66, 0.69, 0.84), 0.68);
+    farWater = mix(farWater, uDeepColor * vec3(0.48, 0.53, 0.69), 0.38);
+    col = mix(col, farWater, blendW * 0.8);
 
     float forwardHaze =
       smoothstep(-0.12, 0.48, -dir.z) * (1.0 - smoothstep(0.42, 0.94, up));
-    col = mix(col, uMidColor * vec3(0.94, 0.97, 1.04), forwardHaze * 0.09);
+    col = mix(col, uMidColor * vec3(0.94, 0.97, 1.04), forwardHaze * 0.1);
+
+    // Slow peripheral breathing: matches backdrop mood; fades at zenith and nadir.
+    float nadirQuiet = smoothstep(-0.86, -0.24, up);
+    float sideAxis = pow(clamp(horiz, 0.0, 1.0), 1.08);
+    float zenithGuard = 1.0 - smoothstep(0.48, 0.92, up);
+    float wbA = sin(uTime * 0.152 + vWorldPos.x * 0.0056 + vWorldPos.z * 0.0045);
+    float wbB = sin(uTime * 0.091 + horiz * 2.75 + vWorldPos.y * 0.016);
+    float waterBreath = 0.922 + wbA * 0.048 + wbB * 0.034;
+    col = mix(col, col * waterBreath, sideAxis * zenithGuard * nadirQuiet * 0.68);
 
     gl_FragColor = vec4(col, 1.0);
   }

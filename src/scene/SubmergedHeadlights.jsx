@@ -2,6 +2,9 @@ import { useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
+/** Volumetric cone, spot, and lens emissive strengths vs authored tuning presets. */
+const HEADLIGHT_STRENGTH_MUL = 3;
+
 const NOISE_GLSL = `
 float hash31(vec3 p) {
   return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
@@ -283,10 +286,11 @@ function SealedBeamLens({
 }
 
 function mergeTuning(t) {
+  const S = HEADLIGHT_STRENGTH_MUL;
   return {
     murk: t.murk ?? 0.9,
     shaftHalf: t.shaftHalf ?? 9.2,
-    coneIntensity: t.coneIntensity ?? 0.14,
+    coneIntensity: (t.coneIntensity ?? 0.14) * S,
     coneSoftness: t.coneSoftness ?? 1.75,
     beamFogReach: t.beamFogReach ?? 2.35,
     radiusNarrow: t.radiusNarrow ?? 0.085,
@@ -298,9 +302,9 @@ function mergeTuning(t) {
     lensZ: t.lensZ ?? 0.055,
     lensColor: t.lensColor ?? '#f2e8d4',
     lensEmissive: t.lensEmissive ?? '#e8d2a0',
-    lensEmissiveIntensity: t.lensEmissiveIntensity ?? 1.05,
+    lensEmissiveIntensity: (t.lensEmissiveIntensity ?? 1.05) * S,
     spotColor: t.spotColor ?? '#ffd9a8',
-    spotIntensity: t.spotIntensity ?? 0.48,
+    spotIntensity: (t.spotIntensity ?? 0.48) * S,
     spotDistance: t.spotDistance ?? 15,
     spotAngle: t.spotAngle ?? 0.48,
     spotPenumbra: t.spotPenumbra ?? 0.93,
@@ -310,6 +314,14 @@ function mergeTuning(t) {
     coneRadiusTop: t.coneRadiusTop ?? 0.09,
     coneRadiusBottom: t.coneRadiusBottom ?? 3.15,
     coneRadialSegs: t.coneRadialSegs ?? 24,
+    /** Extra Euler (rad, order XYZ) on each lamp group — aim beams without moving anchors. */
+    lampEuler: t.lampEuler ?? [0, 0, 0],
+    /** Camera distance at which proximity mul starts rising (far). */
+    proximityFar: t.proximityFar ?? 54,
+    /** Camera distance at which proximity mul reaches 1 (near). */
+    proximityNear: t.proximityNear ?? 10.5,
+    /** Minimum intensity multiplier when camera is at/ beyond proximityFar. */
+    proximityMinMul: t.proximityMinMul ?? 0.22,
   };
 }
 
@@ -332,6 +344,43 @@ export const SWAMP_HEADLIGHT_TUNING_VINTAGE = {
   spotDistance: 20,
   spotAngle: 0.52,
   spotColor: '#d8c4a4',
+};
+
+/**
+ * Submerged Fiat Panda — shorter, murkier cones; faint sealed-beam read at distance.
+ * Body stays dark; headlights + cones carry discovery. Tune `SwampSunkenFiatPanda` anchors.
+ */
+export const SWAMP_HEADLIGHT_TUNING_FIAT = {
+  murk: 0.93,
+  shaftHalf: 4.8,
+  coneIntensity: 0.14,
+  coneSoftness: 1.95,
+  beamFogReach: 2.12,
+  radiusNarrow: 0.062,
+  radiusWide: 2.38,
+  coreColorHint: '#4a443a',
+  coreFogLerp: 0.45,
+  coreMul: 0.31,
+  lensRadius: 0.088,
+  lensZ: 0.04,
+  lensColor: '#ddd0bc',
+  lensEmissive: '#c8b896',
+  lensEmissiveIntensity: 0.48,
+  spotColor: '#baa892',
+  spotIntensity: 0.26,
+  spotDistance: 13,
+  spotAngle: 0.42,
+  spotPenumbra: 0.97,
+  spotDecay: 2.5,
+  spotTargetZ: -8.2,
+  beamStartBias: 0.03,
+  coneRadiusTop: 0.056,
+  coneRadiusBottom: 2.15,
+  coneRadialSegs: 20,
+  lampEuler: [0, 0, 0],
+  proximityFar: 72,
+  proximityNear: 12,
+  proximityMinMul: 0.4,
 };
 
 /**
@@ -363,8 +412,16 @@ export default function SubmergedHeadlights({
       rootRef.current.localToWorld(scratch);
       minD = Math.min(minD, camera.position.distanceTo(scratch));
     }
-    const t = THREE.MathUtils.smoothstep(minD, 54, 10.5);
-    proximityMulRef.current = THREE.MathUtils.lerp(0.22, 1, t);
+    const th = THREE.MathUtils.smoothstep(
+      minD,
+      tune.proximityFar,
+      tune.proximityNear,
+    );
+    proximityMulRef.current = THREE.MathUtils.lerp(
+      tune.proximityMinMul,
+      1,
+      th,
+    );
   });
 
   const coneGeom = useMemo(() => {
@@ -393,6 +450,7 @@ export default function SubmergedHeadlights({
         <group
           key={i}
           position={[pos.x, pos.y, pos.z + tune.beamStartBias]}
+          rotation={tune.lampEuler}
         >
           <SealedBeamLens
             color={tune.lensColor}

@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useRadio } from '../audio/RadioContext.jsx';
 import { AQ_ORB_DEBUG } from '../debug/aquariumRecovery.js';
+import { getDustTexture } from './assets/dustTexture.js';
 import { getHaloTexture } from './assets/haloTexture.js';
 
 /**
@@ -15,6 +16,96 @@ const DEFAULT_MOD = { beam: 1, haze: 1, shimmer: 1 };
 /** Consider pointer up a tap when movement stays within this (px). */
 const TAP_THRESHOLD_PX = 20;
 
+/**
+ * Tunable beacon look + placement (merged with `theme.radio.beaconVisual`).
+ * Distant placement: `TypographicDistantBeacon` (outside typography pullback group).
+ * Depth uses `beaconDepthOffsetBeyondTypography`, or legacy `beaconDepthOffsetBeyondLetters`.
+ */
+export const DEFAULT_BEACON_VISUAL = {
+  /**
+   * World units from “o” anchor along ray (spawn camera → anchor), then pushed past anchor.
+   * Larger values = clearer parallax vs letters.
+   */
+  beaconDepthOffsetBeyondTypography: 16,
+  /** Legacy alias for depth. */
+  beaconDepthOffsetBeyondLetters: 16,
+  /** Extra world offset after depth solve (before parenting transform). */
+  beaconWorldOffsetFromOSlot: [0, 0, 0],
+  /** Nudges beacon in camera right / up (world-ish, from camera basis). */
+  beaconScreenAlignX: 0,
+  beaconScreenAlignY: 0,
+  /** Multiplier on perspective-correct scale (fine-tune apparent size at spawn). */
+  beaconApparentScaleMul: 1,
+  /** Explicit world scale (×). Stacks with `beaconWorldScaleMul`. */
+  beaconWorldScale: 1,
+  /** Extra uniform scale on the placement group (world). */
+  beaconWorldScaleMul: 1,
+  /** Multiplies `auraScaleMul` for bloom/halos; alias: `beaconAuraScale`. */
+  beaconAuraScaleMul: 1,
+  /** Multiplies orbit dust radius (stacked with `orbitRadiusMul`). */
+  beaconOrbitRadiusMul: 1,
+  slotLocalZOffset: 0,
+  typographyScaleMul: 1.02,
+  coreRadiusMul: 1.28,
+  hitboxRadiusMul: 1.06,
+  auraScaleMul: 1.12,
+  softAuraScaleMul: 2.18,
+  softAuraOpacityMul: 0.37,
+  orbitRadiusMul: 1.04,
+  orbitParticleCount: 26,
+  orbitParticleSizeMul: 1.0,
+};
+
+export function resolveBeaconVisual(partial) {
+  const p = partial && typeof partial === 'object' ? partial : {};
+  const merged = { ...DEFAULT_BEACON_VISUAL, ...p };
+  const depthBeyond =
+    p.beaconDepthOffsetBeyondTypography ?? p.beaconDepthOffsetBeyondLetters;
+  if (depthBeyond != null && Number.isFinite(Number(depthBeyond))) {
+    merged.beaconDepthOffsetBeyondTypography = Number(depthBeyond);
+  }
+  merged.beaconAuraScaleMul =
+    p.beaconAuraScaleMul ??
+    p.beaconAuraScale ??
+    DEFAULT_BEACON_VISUAL.beaconAuraScaleMul;
+  if (merged.beaconWorldScale == null || !Number.isFinite(merged.beaconWorldScale)) {
+    merged.beaconWorldScale = DEFAULT_BEACON_VISUAL.beaconWorldScale;
+  }
+  if (merged.beaconScreenAlignX == null || !Number.isFinite(merged.beaconScreenAlignX)) {
+    merged.beaconScreenAlignX = DEFAULT_BEACON_VISUAL.beaconScreenAlignX;
+  }
+  if (merged.beaconScreenAlignY == null || !Number.isFinite(merged.beaconScreenAlignY)) {
+    merged.beaconScreenAlignY = DEFAULT_BEACON_VISUAL.beaconScreenAlignY;
+  }
+  const woff = p.beaconWorldOffsetFromOSlot ?? merged.beaconWorldOffsetFromOSlot;
+  merged.beaconWorldOffsetFromOSlot =
+    Array.isArray(woff) && woff.length >= 3
+      ? [Number(woff[0]) || 0, Number(woff[1]) || 0, Number(woff[2]) || 0]
+      : [0, 0, 0];
+  return merged;
+}
+
+function makeOrbitPositions(count) {
+  const arr = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    arr[i * 3 + 0] = 0;
+    arr[i * 3 + 1] = 0;
+    arr[i * 3 + 2] = 0;
+  }
+  return arr;
+}
+
+function makeOrbitSeeds(count) {
+  const arr = new Float32Array(count * 4);
+  for (let i = 0; i < count; i++) {
+    arr[i * 4 + 0] = 0.45 + Math.random() * 0.45;
+    arr[i * 4 + 1] = Math.random() * Math.PI * 2;
+    arr[i * 4 + 2] = 0.15 + Math.random() * 0.45;
+    arr[i * 4 + 3] = 0.3 + Math.random() * 0.7;
+  }
+  return arr;
+}
+
 export default function AmbientRadio({
   position = [3, 0.5, -5],
   glowIntensity = 1,
@@ -24,14 +115,36 @@ export default function AmbientRadio({
   typographyScale = 1,
   murkTint = null,
   beaconAtmosphere = null,
+  beaconVisual: beaconVisualProp = null,
 }) {
   const groupRef = useRef();
   const spinGroupRef = useRef();
   const innerRef = useRef();
   const haloRef = useRef();
+  const softHaloRef = useRef();
   const innerMat = useRef();
   const haloMat = useRef();
+  const softHaloMat = useRef();
+  const orbitRef = useRef();
+  const orbitMat = useRef();
   const hovered = useRef(false);
+
+  const bv = useMemo(
+    () => resolveBeaconVisual(beaconVisualProp),
+    [beaconVisualProp],
+  );
+
+  const orbitCount = useMemo(
+    () =>
+      THREE.MathUtils.clamp(Math.round(bv.orbitParticleCount), 8, 48),
+    [bv.orbitParticleCount],
+  );
+
+  const orbitPositions = useMemo(
+    () => makeOrbitPositions(orbitCount),
+    [orbitCount],
+  );
+  const orbitSeeds = useMemo(() => makeOrbitSeeds(orbitCount), [orbitCount]);
 
   const murkColor = useMemo(
     () => (murkTint ? new THREE.Color(murkTint) : null),
@@ -79,6 +192,7 @@ export default function AmbientRadio({
   });
 
   const haloTexture = useMemo(() => getHaloTexture(), []);
+  const dustTexture = useMemo(() => getDustTexture(), []);
 
   const tryPlayPauseToggle = (reason) => {
     if (AQ_ORB_DEBUG) {
@@ -140,6 +254,13 @@ export default function AmbientRadio({
 
     const mod = modRef?.current ?? DEFAULT_MOD;
     const typ = Math.max(0.35, typographyScale);
+    const coreR = 0.22 * bv.coreRadiusMul;
+    const orbitRScale =
+      coreR *
+      typ *
+      bv.orbitRadiusMul *
+      (bv.beaconOrbitRadiusMul ?? 1) *
+      (beaconAtmosphere?.orbitDustBaseScale ?? 1);
     const visMul = mod.beam * mod.haze * mod.shimmer;
 
     let proxSmooth = 0;
@@ -191,11 +312,19 @@ export default function AmbientRadio({
       innerRef.current.scale.setScalar(pulse * typ);
     }
     if (haloRef.current) {
-      let haloScale = (1.6 + pulse * 0.45 + playMix * 0.25) * typ;
+      let haloScale =
+        (1.6 + pulse * 0.45 + playMix * 0.25) *
+        typ *
+        bv.auraScaleMul *
+        (bv.beaconAuraScaleMul ?? 1);
       if (beaconAtmosphere) {
         haloScale *= 1 + (1 - proxSmooth) * beaconAtmosphere.haloFarSpread;
       }
       haloRef.current.scale.set(haloScale, haloScale, haloScale);
+    }
+    if (softHaloRef.current && haloRef.current) {
+      const hs = haloRef.current.scale.x * bv.softAuraScaleMul;
+      softHaloRef.current.scale.set(hs, hs, hs);
     }
 
     if (innerMat.current) {
@@ -233,6 +362,60 @@ export default function AmbientRadio({
       if (embedded && murkColor) {
         const murkAmt = beaconAtmosphere?.murkLerpHalo ?? 0.14;
         haloMat.current.color.lerp(murkColor, murkAmt);
+      }
+    }
+
+    if (softHaloMat.current && haloMat.current) {
+      softHaloMat.current.opacity = Math.max(
+        0.045,
+        haloMat.current.opacity *
+          bv.softAuraOpacityMul *
+          (embedded ? 1.05 : 1.0),
+      );
+      softHaloMat.current.color.copy(haloMat.current.color);
+    }
+
+    const op = orbitRef.current?.geometry?.attributes?.position;
+    if (op) {
+      const arr = op.array;
+      const tEff = t * (isPlaying ? 1.0 : 0.35);
+      const dMul =
+        1 +
+        proxSmooth * (beaconAtmosphere?.orbitDustProxScale ?? 0.4);
+      for (let i = 0; i < orbitCount; i++) {
+        const radius = orbitSeeds[i * 4 + 0];
+        const phase = orbitSeeds[i * 4 + 1];
+        const omega = orbitSeeds[i * 4 + 2];
+        const vAmp = orbitSeeds[i * 4 + 3];
+        const a = phase + tEff * omega;
+        arr[i * 3 + 0] = Math.cos(a) * radius * orbitRScale * dMul;
+        arr[i * 3 + 1] =
+          Math.sin(tEff * omega * 1.3 + phase) * vAmp * 0.5 * orbitRScale * dMul;
+        arr[i * 3 + 2] = Math.sin(a) * radius * orbitRScale * dMul;
+      }
+      op.needsUpdate = true;
+    }
+
+    if (orbitMat.current) {
+      const dSize =
+        0.095 *
+        bv.orbitParticleSizeMul *
+        typ *
+        (1 + proxSmooth * (beaconAtmosphere?.orbitDustProxScale ?? 0.35));
+      orbitMat.current.size = dSize;
+      const baseDustA = (isPlaying ? 0.62 : 0.42) * presenceMul * visMul;
+      orbitMat.current.opacity = Math.max(
+        0.08,
+        baseDustA *
+          glowIntensity *
+          (embedded ? 1.02 : 0.95) *
+          (1 - (beaconAtmosphere?.murkLerpDust ?? 0) * 0.35),
+      );
+      if (embedded && murkColor) {
+        const murkAmt = beaconAtmosphere?.murkLerpDust ?? 0.12;
+        orbitMat.current.color.copy(dustOrbColor).lerp(murkColor, murkAmt);
+      } else {
+        orbitMat.current.color.copy(dustOrbColor);
       }
     }
 
@@ -281,7 +464,7 @@ export default function AmbientRadio({
     >
       <group ref={spinGroupRef}>
         <mesh ref={innerRef} raycast={() => null}>
-          <icosahedronGeometry args={[0.22, 1]} />
+          <icosahedronGeometry args={[0.22 * bv.coreRadiusMul, 1]} />
           <meshBasicMaterial
             ref={innerMat}
             color={'#9be7f2'}
@@ -292,7 +475,9 @@ export default function AmbientRadio({
           />
         </mesh>
 
-        <mesh scale={Math.max(typographyScale, 0.72)}>
+        <mesh
+          scale={Math.max(typographyScale, 0.72) * bv.hitboxRadiusMul}
+        >
           <sphereGeometry args={[1.0, 16, 12]} />
           <meshBasicMaterial
             transparent
@@ -301,6 +486,46 @@ export default function AmbientRadio({
             colorWrite={false}
           />
         </mesh>
+
+        <points
+          ref={orbitRef}
+          key={orbitCount}
+          raycast={() => null}
+          frustumCulled={false}
+        >
+          <bufferGeometry>
+            <bufferAttribute
+              attach="attributes-position"
+              count={orbitCount}
+              array={orbitPositions}
+              itemSize={3}
+            />
+          </bufferGeometry>
+          <pointsMaterial
+            ref={orbitMat}
+            map={dustTexture}
+            size={0.1}
+            color={'#bdeaf2'}
+            transparent
+            depthWrite={false}
+            opacity={0.72}
+            sizeAttenuation
+            blending={THREE.AdditiveBlending}
+            toneMapped={false}
+          />
+        </points>
+
+        <sprite ref={softHaloRef} raycast={() => null}>
+          <spriteMaterial
+            ref={softHaloMat}
+            map={haloTexture}
+            transparent
+            depthWrite={false}
+            toneMapped={false}
+            color={'#c8f0fb'}
+            blending={THREE.AdditiveBlending}
+          />
+        </sprite>
 
         <sprite ref={haloRef} raycast={() => null}>
           <spriteMaterial
@@ -320,3 +545,4 @@ export default function AmbientRadio({
 
 const warm = new THREE.Color('#cdeff5');
 const cool = new THREE.Color('#79b6c0');
+const dustOrbColor = new THREE.Color('#bdeaf2');

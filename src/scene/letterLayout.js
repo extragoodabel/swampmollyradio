@@ -12,6 +12,12 @@ export const FLOAT_LAYOUT_DEFAULT = {
 
 export const LETTER_LAYOUT_SEED = 24601;
 
+/** Ensures floating environmental copy renders lowercase (theme + Troika/canvas paths). */
+export function normalizeFloatingPhrase(text) {
+  if (typeof text !== 'string') return text;
+  return text.toLocaleLowerCase('en-US');
+}
+
 function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {

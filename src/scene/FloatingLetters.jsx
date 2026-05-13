@@ -1,11 +1,19 @@
-import { useEffect, useMemo, useRef } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  Suspense,
+} from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
-import AmbientRadio from './AmbientRadio.jsx';
+import AmbientRadio, { resolveBeaconVisual } from './AmbientRadio.jsx';
+import BeaconCompanionFish from './BeaconCompanionFish.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 import { resolveRadioSlotIndex } from '../theme/themes.js';
-import { computeLetterSlots, FLOAT_LAYOUT_DEFAULT } from './letterLayout.js';
+import { computeLetterSlots, FLOAT_LAYOUT_DEFAULT, normalizeFloatingPhrase } from './letterLayout.js';
 // Pass a real URL string so Troika fetches valid JSON in dev and
 // production (plain JSON module imports can stringify to "[object Object]"
 // in minified builds).
@@ -216,6 +224,9 @@ function Letter({
   beam,
   typographyReadability,
 }) {
+  const displayChar =
+    typeof char === 'string' && char !== ' ' ? char.toLocaleLowerCase('en-US') : char;
+
   const groupRef = useRef();
   const textRef = useRef();
 
@@ -386,9 +397,10 @@ function Letter({
   return (
     <group ref={groupRef} position={[baseX, baseY, baseZ]}>
       <Text
+        key={displayChar}
         ref={textRef}
         font={FLOATING_LETTERS_FONT_URL}
-        characters={char}
+        characters={displayChar}
         fontSize={scale}
         color={color}
         fillOpacity={opacity}
@@ -396,8 +408,135 @@ function Letter({
         anchorY="middle"
         onSync={handleSync}
       >
-        {char}
+        {displayChar}
       </Text>
+    </group>
+  );
+}
+
+const _camRight = new THREE.Vector3();
+const _camUp = new THREE.Vector3();
+const _camFwd = new THREE.Vector3();
+
+/**
+ * Beacon root is parent’s **local** space (Scene wraps typography in a Y-offset group).
+ * `bWorld` is converted with `inverse(parent.matrixWorld)` so world placement is correct.
+ * Depth ray uses **spawn** camera (first frame) so parallax reveals the beacon behind letters.
+ */
+export function TypographicDistantBeacon({
+  anchorRef,
+  modRef,
+  typographyScale,
+  murkTint,
+  glowIntensity,
+  beaconAtmosphere,
+  beaconVisual: beaconVisualProp,
+  placementResetKey = '',
+  enabled = true,
+  /** Optional group (sibling of the scaled beacon root): receives beacon world position at scale 1. */
+  companionFollowGroupRef = null,
+}) {
+  const worldRootRef = useRef();
+  const spawnCamRef = useRef(null);
+  const bv = useMemo(
+    () => resolveBeaconVisual(beaconVisualProp),
+    [beaconVisualProp],
+  );
+  const scratch = useMemo(
+    () => ({
+      oWorld: new THREE.Vector3(),
+      bWorld: new THREE.Vector3(),
+      dir: new THREE.Vector3(),
+      invParent: new THREE.Matrix4(),
+      localPos: new THREE.Vector3(),
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    spawnCamRef.current = null;
+  }, [placementResetKey]);
+
+  useFrame((s) => {
+    const anchor = anchorRef?.current;
+    const root = worldRootRef.current;
+    if (!anchor || !root) return;
+
+    anchor.updateMatrixWorld(true);
+    anchor.getWorldPosition(scratch.oWorld);
+
+    if (!spawnCamRef.current) {
+      spawnCamRef.current = s.camera.position.clone();
+    }
+    const camSpawn = spawnCamRef.current;
+
+    const depth =
+      Number(
+        bv.beaconDepthOffsetBeyondTypography ??
+          bv.beaconDepthOffsetBeyondLetters,
+      ) || 0;
+
+    scratch.dir.subVectors(scratch.oWorld, camSpawn);
+    const dOspawn = Math.max(scratch.dir.length(), 1e-4);
+    scratch.dir.multiplyScalar(1 / dOspawn);
+
+    scratch.bWorld.copy(scratch.oWorld).addScaledVector(scratch.dir, depth);
+
+    const off = bv.beaconWorldOffsetFromOSlot;
+    if (off?.length >= 3) {
+      scratch.bWorld.x += off[0] ?? 0;
+      scratch.bWorld.y += off[1] ?? 0;
+      scratch.bWorld.z += off[2] ?? 0;
+    }
+
+    s.camera.matrixWorld.extractBasis(_camRight, _camUp, _camFwd);
+    scratch.bWorld.addScaledVector(_camRight, bv.beaconScreenAlignX ?? 0);
+    scratch.bWorld.addScaledVector(_camUp, bv.beaconScreenAlignY ?? 0);
+
+    const parent = root.parent;
+    if (parent) {
+      parent.updateMatrixWorld(true);
+      scratch.invParent.copy(parent.matrixWorld).invert();
+      scratch.localPos.copy(scratch.bWorld).applyMatrix4(scratch.invParent);
+      root.position.copy(scratch.localPos);
+    } else {
+      root.position.copy(scratch.bWorld);
+    }
+
+    const companion = companionFollowGroupRef?.current;
+    if (companion) {
+      companion.position.copy(scratch.localPos);
+      companion.scale.set(1, 1, 1);
+    }
+
+    const camNow = s.camera.position;
+    const dO = Math.max(scratch.oWorld.distanceTo(camNow), 1e-4);
+    const dB = Math.max(scratch.bWorld.distanceTo(camNow), 1e-4);
+    const distRatio = THREE.MathUtils.clamp(dB / dO, 0.88, 5.5);
+    const sMul =
+      distRatio *
+      (bv.beaconApparentScaleMul ?? 1) *
+      (bv.beaconWorldScale ?? 1) *
+      (bv.beaconWorldScaleMul ?? 1);
+    root.scale.setScalar(sMul);
+  });
+
+  if (!enabled) return null;
+
+  return (
+    <group ref={worldRootRef}>
+      <ErrorBoundary name="FloatingLetters.AmbientRadio.distant" fallback={null}>
+        <AmbientRadio
+          embedded
+          modRef={modRef}
+          typographyScale={typographyScale}
+          murkTint={murkTint}
+          glowIntensity={glowIntensity}
+          beaconAtmosphere={beaconAtmosphere}
+          beaconVisual={bv}
+          enabled
+        />
+      </ErrorBoundary>
     </group>
   );
 }
@@ -408,23 +547,39 @@ const ORB_ROT_SCALE = 0.42;
 /** Slightly under 1 keeps the embedded orb discoverable vs glyph cap-height. */
 const ORB_VISUAL_SCALE_MUL = 0.94;
 
-export function LetterRadioSlot({
-  baseX,
-  baseY,
-  baseZ,
-  phase,
-  scale,
-  opacity,
-  floatStrength,
-  shimmerStrength,
-  murkTint,
-  glowIntensity,
-  beam,
-  beaconAtmosphere = null,
-  typographyReadability,
-}) {
+/** Invisible typography anchor for the radio slot — motion drives `modRef` only. */
+export const LetterRadioSlot = forwardRef(function LetterRadioSlot(
+  {
+    baseX,
+    baseY,
+    baseZ,
+    phase,
+    scale,
+    opacity,
+    floatStrength,
+    shimmerStrength,
+    murkTint,
+    glowIntensity,
+    beam,
+    beaconAtmosphere = null,
+    typographyReadability,
+    modRef,
+  },
+  forwardedRef,
+) {
+  void glowIntensity;
+  void murkTint;
+  void scale;
   const groupRef = useRef();
-  const modRef = useRef({ beam: 1, haze: 1, shimmer: 1 });
+
+  const setGroupRef = useCallback(
+    (node) => {
+      groupRef.current = node;
+      if (typeof forwardedRef === 'function') forwardedRef(node);
+      else if (forwardedRef) forwardedRef.current = node;
+    },
+    [forwardedRef],
+  );
 
   const scratch = useMemo(
     () => ({
@@ -482,6 +637,7 @@ export function LetterRadioSlot({
         0.028 *
         (0.4 + floatStrength * 8);
     g.scale.set(1, flutter, 1);
+    g.updateMatrixWorld(true);
 
     const wobble =
       Math.sin(t * 0.62 + phase) * 0.6 +
@@ -538,24 +694,8 @@ export function LetterRadioSlot({
     };
   });
 
-  const typoScale = (scale / 0.3) * ORB_VISUAL_SCALE_MUL;
-
-  return (
-    <group ref={groupRef} position={[baseX, baseY, baseZ]}>
-      <ErrorBoundary name="FloatingLetters.AmbientRadio.embedded" fallback={null}>
-        <AmbientRadio
-          embedded
-          modRef={modRef}
-          typographyScale={typoScale}
-          murkTint={murkTint}
-          glowIntensity={glowIntensity}
-          beaconAtmosphere={beaconAtmosphere}
-          enabled
-        />
-      </ErrorBoundary>
-    </group>
-  );
-}
+  return <group ref={setGroupRef} position={[baseX, baseY, baseZ]} />;
+});
 
 export default function FloatingLetters({
   enabled = true,
@@ -601,6 +741,12 @@ export default function FloatingLetters({
   radioGlowIntensity = 1,
   /** Swamp Molly: `theme.radio.beaconAtmosphere` for submerged beacon presence. */
   beaconAtmosphere = null,
+  /** Depth/scale + aura tuning: `theme.radio.beaconVisual`. */
+  beaconVisual = null,
+  /** Resets spawn-camera beacon ray (pass `themeId` from Scene). */
+  beaconPlacementResetKey = '',
+  /** Small satellite school following the typography beacon (merged in Scene from theme). */
+  beaconCompanionFish = null,
   /** Theme tuning for scatter vs readability (see `DEFAULT_FLOAT_LAYOUT`). */
   floatLayout: floatLayoutProp,
   /** Merged theme defaults + `letters.typographyReadability` for camera-distance legibility. */
@@ -617,6 +763,8 @@ export default function FloatingLetters({
     }),
     [floatLayoutProp],
   );
+
+  const phrase = useMemo(() => normalizeFloatingPhrase(text), [text]);
 
   const typographyReadability = useMemo(
     () => ({
@@ -635,8 +783,8 @@ export default function FloatingLetters({
   );
 
   const radioSlotIndex = useMemo(
-    () => resolveRadioSlotIndex(text, radioSlot),
-    [text, radioSlot],
+    () => resolveRadioSlotIndex(phrase, radioSlot),
+    [phrase, radioSlot],
   );
 
   const layoutOpts = useMemo(() => {
@@ -649,7 +797,7 @@ export default function FloatingLetters({
   const layout = useMemo(
     () =>
       computeLetterSlots(
-        text,
+        phrase,
         spacing,
         depthSpread,
         rowGapMul,
@@ -662,7 +810,7 @@ export default function FloatingLetters({
     [
       spacing,
       depthSpread,
-      text,
+      phrase,
       rowGapMul,
       intraLineYJitterMul,
       interRowJitterMul,
@@ -680,31 +828,71 @@ export default function FloatingLetters({
       .slice(0, 6)
       .map(({ baseX, baseY, baseZ }) => ({ x: baseX, y: baseY, z: baseZ }));
     console.info('[aquarium] FloatingLetters mounted (Troika)', {
-      phrase: text,
-      charCount: text.length,
+      phrase,
+      charCount: phrase.length,
       slotCount: layout.length,
       glyphs,
       radioSlotIndex,
       positionSamples: samples,
     });
-  }, [text, layout, radioSlotIndex]);
+  }, [phrase, layout, radioSlotIndex]);
+
+  const beaconSlotAnchorRef = useRef(null);
+  const beaconModRef = useRef({ beam: 1, haze: 1, shimmer: 1 });
+  const beaconVisualResolved = useMemo(
+    () => resolveBeaconVisual(beaconVisual),
+    [beaconVisual],
+  );
+  const beaconTypographyScale = useMemo(
+    () =>
+      (scale / 0.3) *
+      ORB_VISUAL_SCALE_MUL *
+      beaconVisualResolved.typographyScaleMul,
+    [scale, beaconVisualResolved.typographyScaleMul],
+  );
+
+  const beaconCompanionGroupRef = useRef(null);
 
   if (!enabled) return null;
 
   return (
-    <TypographyResolveGroup typographyReadability={typographyReadability}>
-      {layout.map((l, i) => {
-        if (/\s/.test(l.char)) return null;
+    <>
+      <TypographyResolveGroup typographyReadability={typographyReadability}>
+        {layout.map((l, i) => {
+          if (/\s/.test(l.char)) return null;
 
-        const useRadioGlyph =
-          radioEmbedded &&
-          radioSlotIndex != null &&
-          i === radioSlotIndex;
+          const useRadioGlyph =
+            radioEmbedded &&
+            radioSlotIndex != null &&
+            i === radioSlotIndex;
 
-        if (useRadioGlyph) {
+          if (useRadioGlyph) {
+            return (
+              <LetterRadioSlot
+                ref={beaconSlotAnchorRef}
+                key={i}
+                baseX={l.baseX}
+                baseY={l.baseY}
+                baseZ={l.baseZ}
+                phase={l.phase}
+                scale={scale}
+                opacity={opacity}
+                floatStrength={floatStrength}
+                shimmerStrength={shimmerStrength}
+                murkTint={tintedColor}
+                glowIntensity={radioGlowIntensity}
+                beam={beam}
+                beaconAtmosphere={beaconAtmosphere}
+                typographyReadability={typographyReadability}
+                modRef={beaconModRef}
+              />
+            );
+          }
+
           return (
-            <LetterRadioSlot
+            <Letter
               key={i}
+              char={l.char}
               baseX={l.baseX}
               baseY={l.baseY}
               baseZ={l.baseZ}
@@ -713,34 +901,39 @@ export default function FloatingLetters({
               opacity={opacity}
               floatStrength={floatStrength}
               shimmerStrength={shimmerStrength}
-              murkTint={tintedColor}
-              glowIntensity={radioGlowIntensity}
+              color={tintedColor}
+              highlightColor={highlightColor}
               beam={beam}
-              beaconAtmosphere={beaconAtmosphere}
               typographyReadability={typographyReadability}
             />
           );
-        }
-
-        return (
-          <Letter
-            key={i}
-            char={l.char}
-            baseX={l.baseX}
-            baseY={l.baseY}
-            baseZ={l.baseZ}
-            phase={l.phase}
-            scale={scale}
-            opacity={opacity}
-            floatStrength={floatStrength}
-            shimmerStrength={shimmerStrength}
-            color={tintedColor}
-            highlightColor={highlightColor}
-            beam={beam}
-            typographyReadability={typographyReadability}
+        })}
+      </TypographyResolveGroup>
+      {radioEmbedded && radioSlotIndex != null ? (
+        <>
+          {beaconCompanionFish ? (
+            <group ref={beaconCompanionGroupRef}>
+              <Suspense fallback={null}>
+                <BeaconCompanionFish config={beaconCompanionFish} />
+              </Suspense>
+            </group>
+          ) : null}
+          <TypographicDistantBeacon
+            anchorRef={beaconSlotAnchorRef}
+            modRef={beaconModRef}
+            typographyScale={beaconTypographyScale}
+            murkTint={tintedColor}
+            glowIntensity={radioGlowIntensity}
+            beaconAtmosphere={beaconAtmosphere}
+            beaconVisual={beaconVisual}
+            placementResetKey={beaconPlacementResetKey}
+            companionFollowGroupRef={
+              beaconCompanionFish ? beaconCompanionGroupRef : null
+            }
+            enabled
           />
-        );
-      })}
-    </TypographyResolveGroup>
+        </>
+      ) : null}
+    </>
   );
 }

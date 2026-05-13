@@ -7,7 +7,7 @@ import { useRadio } from '../audio/RadioContext.jsx';
  * Visible when:
  *   - audio is playing or loading (shows station + now-playing track)
  *   - audio has been started at least once and is now paused
- *     (shows a faint "tap the beacon to resume" hint)
+ *     (shows a discreet paused state)
  *   - there's an error (shows a single discreet line)
  *
  * Hidden entirely before first interaction so the scene starts clean.
@@ -120,9 +120,7 @@ export default function RadioOverlay() {
         </>
       )}
       {showPaused && !showError && (
-        <div className="radio-overlay__hint">
-          Paused · tap beacon to play/pause
-        </div>
+        <div className="radio-overlay__hint">Paused</div>
       )}
       {showError && (
         <div className="radio-overlay__hint radio-overlay__hint--error">

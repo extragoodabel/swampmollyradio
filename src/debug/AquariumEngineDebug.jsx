@@ -3,7 +3,8 @@ import { useEffect, useRef } from 'react';
 
 /**
  * Fixed DOM readout updated from the R3F loop — proves useFrame + camera
- * are advancing without routing React state every tick.
+ * are advancing. Mounted only when `AQ_ENGINE_HUD` is true (`?aqdebug=1` or
+ * `VITE_AQ_DEBUG=1`), not for every dev session.
  */
 export default function AquariumEngineDebug({ enabled }) {
   const { camera, gl } = useThree();

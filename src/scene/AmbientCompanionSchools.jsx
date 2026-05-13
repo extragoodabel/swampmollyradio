@@ -20,6 +20,8 @@ function CompanionAnchor({
   global: g,
   entry: e,
   children,
+  /** Salmon-only: max world-units/s the anchor may close toward its target (reduces visible backward sprints). */
+  catchUpMaxPerSec = Number.POSITIVE_INFINITY,
 }) {
   const groupRef = useRef(null);
   const smoothPos = useRef(new THREE.Vector3());
@@ -77,7 +79,25 @@ function CompanionAnchor({
       inited.current = true;
     }
     const a = 1 - Math.exp(-e.follow * dt);
+    const px = smoothPos.current.x;
+    const py = smoothPos.current.y;
+    const pz = smoothPos.current.z;
     smoothPos.current.lerp(_target, a);
+    let dx = smoothPos.current.x - px;
+    let dy = smoothPos.current.y - py;
+    let dz = smoothPos.current.z - pz;
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const cap = catchUpMaxPerSec;
+    if (Number.isFinite(cap)) {
+      const maxStep = cap * dt;
+      if (len > maxStep) {
+        const s = maxStep / len;
+        dx *= s;
+        dy *= s;
+        dz *= s;
+        smoothPos.current.set(px + dx, py + dy, pz + dz);
+      }
+    }
 
     if (groupRef.current) {
       groupRef.current.position.copy(smoothPos.current);
@@ -181,7 +201,14 @@ export default function AmbientCompanionSchools({
         };
 
         return (
-          <CompanionAnchor key={`${themeId}-ac-${e.seed}`} global={g} entry={entryTuning}>
+          <CompanionAnchor
+            key={`${themeId}-ac-${e.seed}`}
+            global={g}
+            entry={entryTuning}
+            catchUpMaxPerSec={
+              themeId === 'salmonDaysRadio' ? 5.4 : Number.POSITIVE_INFINITY
+            }
+          >
             <ErrorBoundary fallback={null}>
               {companionUseWebpFish ? (
                 <Suspense fallback={null}>

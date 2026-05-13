@@ -7,7 +7,8 @@
  * omit param = full stack). Swamp ignores. Layer thresholds:
  * 1 textured hero · 2 typography · 3 orb · 4 dust+bubbles · 5 vault · 6 haze
  * · 7 shadow fish · 8 light beam · 9 backdrop field · 10 companions + satellites
- * · 11 density/midfield/clouds · 12 canopy · 13 credits hook (log only).
+ * · 11 density/midfield/clouds · 12 (reserved; canopy stays off in `SALMON_ENV`)
+ * · 13 abyss whale skeleton (`SalmonWhaleSkeleton`) + attribution (README).
  */
 
 /** Legacy flag: kept for docs; Scene uses `SALMON_ENV` instead. */
@@ -54,6 +55,11 @@ export const SALMON_ENV = {
   distantSilhouettes: true,
   /** Extra hero-tier `SalmonSatelliteSchools`; heavier, enable only when stable. */
   satelliteSchools: false,
+  /**
+   * `SalmonWhaleSkeleton` — faint GLB below the hero volume; gated to restore ≥13.
+   * Kill: `?aqsalmonkill=whaleSkeleton` or `whale` (alias).
+   */
+  whaleSkeleton: true,
 };
 
 /**
@@ -84,9 +90,11 @@ export function getSalmonEnv() {
       'aqsalmonkill',
     );
     if (!raw) return env;
+    const killAliases = { whale: 'whaleSkeleton' };
     for (const key of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
-      if (Object.prototype.hasOwnProperty.call(env, key)) {
-        env[key] = false;
+      const k = killAliases[key] ?? key;
+      if (Object.prototype.hasOwnProperty.call(env, k)) {
+        env[k] = false;
       }
     }
   } catch {
@@ -101,9 +109,10 @@ export function getSalmonEnv() {
  *
  * Reintroduction steps (need N ≥ threshold; omit param = full stack):
  * 5 vault · 6 waterHaze · 7 distantSilhouettes · 9 backdrop · 10 satelliteSchools
- * · 11 densityCloudsMidfield · 12 canopy
+ * · 11 densityCloudsMidfield · 12 canopy (only if `SALMON_ENV.canopy` is true)
+ * · 13 whaleSkeleton
  *
- * (Steps 1–4, 8, 13 are handled in `Scene.jsx`.)
+ * (Steps 1–4, 8, and partial 13 UI are handled in `Scene.jsx`.)
  */
 export function buildSalmonEnvForScene(themeId) {
   const base = getSalmonEnv();
@@ -126,8 +135,12 @@ export function buildSalmonEnvForScene(themeId) {
     backdrop: base.backdrop && rs >= 9,
     waterHaze: gatedOn('waterHaze', 6),
     distantSilhouettes: base.distantSilhouettes && rs >= 7,
-    canopy: gatedOn('canopy', 12),
+    // Canopy defaults false (`SALMON_ENV`) because the ocean-surface sheet reads as a
+    // hard horizontal band. Do not use `gatedOn`'s "!wasKilled && rs>=step" path here —
+    // that accidentally turned the canopy on at restore step 12.
+    canopy: !!SALMON_ENV.canopy && base.canopy && rs >= 12,
     densityCloudsMidfield: gatedOn('densityCloudsMidfield', 11),
     satelliteSchools: gatedOn('satelliteSchools', 10),
+    whaleSkeleton: base.whaleSkeleton && rs >= 13,
   };
 }

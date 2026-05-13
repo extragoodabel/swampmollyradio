@@ -308,6 +308,10 @@ shows a tiny "tap the beacon to resume" hint.
 Stations are defined as plain objects in `audio/stations.js`. Adding a
 second station is a config-only change.
 
+## 3D assets
+
+- `public/models/blue_whale_skeleton.glb` — blue whale skeleton (**London Natural History Museum Imaging**). Salmon Days: faint abyss layer; progressive restore `?aqsalmonrestore=13` (omit param = full stack). Disable with `?aqsalmonkill=whaleSkeleton` or `?aqsalmonkill=whale`.
+
 ## Performance notes
 
 - Single shared `CanvasTexture` per variant (cached by `getFishTexture`)

@@ -104,6 +104,7 @@ export function buildSwampSceneGates(themeId) {
       car1: true,
       car2: true,
       car1Headlights: true,
+      car2Headlights: true,
       typography: true,
       orb: true,
       particles: true,
@@ -129,6 +130,9 @@ export function buildSwampSceneGates(themeId) {
     car2: alive('car2', 10) && stepOk(10),
     car1Headlights:
       !kill.headlights && alive('car1', 9) && (!active || rs >= 11),
+    /** Fiat Panda cones — same step as vintage car beams; `aqswampkill=headlights` disables both. */
+    car2Headlights:
+      !kill.headlights && alive('car2', 10) && (!active || rs >= 11),
     typography: alive('typography', 2) && stepOk(2),
     orb: alive('orb', 3) && stepOk(3),
     particles: alive('particles', 4) && stepOk(4),

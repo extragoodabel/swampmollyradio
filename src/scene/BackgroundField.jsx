@@ -2,17 +2,26 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-function buildBentPlaneGeometry(width, height, segX, segY, bendZ) {
+function buildBentPlaneGeometry(width, height, segX, segY, bendZ, edgePull = 0) {
   const geo = new THREE.PlaneGeometry(width, height, segX, segY);
   const bend = Number(bendZ);
-  if (!Number.isFinite(bend) || bend <= 0.001) return geo;
+  const pull = Number(edgePull);
+  if (
+    (!Number.isFinite(bend) || bend <= 0.001) &&
+    (!Number.isFinite(pull) || pull <= 0.001)
+  ) {
+    return geo;
+  }
   const hw = width * 0.5;
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i += 1) {
     const x = pos.getX(i);
     const t = Math.min(1, Math.abs(x) / Math.max(1e-6, hw));
-    const zBump = bend * (1 - t * t);
-    pos.setZ(i, pos.getZ(i) + zBump);
+    const tt = t * t;
+    const bowl = Number.isFinite(bend) && bend > 0.001 ? bend * (1 - tt) : 0;
+    const wings =
+      Number.isFinite(pull) && pull > 0.001 ? -pull * tt : 0;
+    pos.setZ(i, pos.getZ(i) + bowl + wings);
   }
   pos.needsUpdate = true;
   geo.computeVertexNormals();
@@ -255,6 +264,7 @@ uniform float uFogNear;
 uniform float uFogFar;
 uniform float uAlphaEdgeWidth;
 uniform float uAlphaTopSoft;
+uniform float uAlphaBottomSoft;
 
 varying vec2 vUv;
 varying float vHeight;
@@ -311,7 +321,7 @@ void main() {
 
   float fogDen = max(1.0, uFogFar - uFogNear);
   float fogFactor = clamp((vFogDepth - uFogNear) / fogDen, 0.0, 1.0);
-  col = mix(col, uFogColor, fogFactor * 0.58);
+  col = mix(col, uFogColor, fogFactor * 0.69);
 
   float alpha = clamp(uBackgroundOpacity * (0.92 - fogFactor * 0.22), 0.45, 1.0);
   if (uAlphaEdgeWidth > 0.001) {
@@ -322,6 +332,13 @@ void main() {
   if (uAlphaTopSoft > 0.001) {
     float topAtt = 1.0 - smoothstep(1.0 - uAlphaTopSoft, 1.0, vUv.y);
     alpha *= mix(0.55, 1.0, topAtt);
+  }
+  if (uAlphaBottomSoft > 0.001) {
+    float botAtt = smoothstep(0.0, uAlphaBottomSoft, vUv.y);
+    alpha *= mix(0.28, 1.0, botAtt);
+    /** Lower UV = “down” on the cloth: sink to ink-black abyss, not lit volume fog (keeps vertical cue). */
+    vec3 abyssDown = vec3(0.012, 0.022, 0.042);
+    col = mix(col, abyssDown, (1.0 - botAtt) * 0.88);
   }
   gl_FragColor = vec4(col, alpha);
 }
@@ -353,10 +370,16 @@ export default function BackgroundField({
    * Salmon Days open-ocean only; keep 0 for flat Swamp plane.
    */
   cycloramaBend = 0,
+  /**
+   * Extra -Z at left/right UV edges (relative to center bow); deepens wrap.
+   */
+  cycloramaEdgePull = 0,
   /** `openOcean` only: fade alpha near UV rectangle edges (hides corners). ~0.04–0.08 */
   openOceanAlphaEdgeWidth = 0,
   /** `openOcean` only: fade alpha across top UV band to blend with zenith / surface glow. */
   openOceanTopSoft = 0,
+  /** `openOcean` only: fade lower band into abyss / fog (no hard floor). */
+  openOceanBottomSoft = 0,
 }) {
   const matRef = useRef();
   const fragmentShader = useMemo(
@@ -372,8 +395,9 @@ export default function BackgroundField({
         segments[0],
         segments[1],
         cycloramaBend,
+        cycloramaEdgePull,
       ),
-    [size[0], size[1], segments[0], segments[1], cycloramaBend],
+    [size[0], size[1], segments[0], segments[1], cycloramaBend, cycloramaEdgePull],
   );
 
   const uniforms = useMemo(
@@ -393,6 +417,7 @@ export default function BackgroundField({
       uOpenOceanTopCurl: { value: 0 },
       uAlphaEdgeWidth: { value: 0 },
       uAlphaTopSoft: { value: 0 },
+      uAlphaBottomSoft: { value: 0 },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -407,6 +432,10 @@ export default function BackgroundField({
   const oceanTopS =
     palette === 'openOcean'
       ? THREE.MathUtils.clamp(Number(openOceanTopSoft), 0, 0.45)
+      : 0;
+  const oceanBotS =
+    palette === 'openOcean'
+      ? THREE.MathUtils.clamp(Number(openOceanBottomSoft), 0, 0.5)
       : 0;
 
   useFrame((_, delta) => {
@@ -445,6 +474,7 @@ export default function BackgroundField({
     u.uOpenOceanTopCurl.value = THREE.MathUtils.clamp(oceanCurl, 0, 2.5);
     u.uAlphaEdgeWidth.value = oceanEdgeW;
     u.uAlphaTopSoft.value = oceanTopS;
+    u.uAlphaBottomSoft.value = oceanBotS;
   });
 
   return (

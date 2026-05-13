@@ -434,3 +434,52 @@ canvas:active {
   outline: none;
   background: rgba(55, 110, 145, 0.72);
 }
+
+/**
+ * Tuning (Leva) — discreet glass orb, top-right + safe-area.
+ * Panel is `hidden` until opened; only this control captures clicks when collapsed.
+ */
+.aquarium-leva-toggle {
+  position: fixed;
+  /* Above Leva panel root (~10000) so open/close stays clickable */
+  z-index: 10100;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  right: max(12px, env(safe-area-inset-right, 0px));
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(100, 165, 200, 0.22);
+  background: rgba(5, 16, 28, 0.52);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: rgba(175, 215, 235, 0.72);
+  cursor: pointer;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.32);
+}
+
+.aquarium-leva-toggle__glyph {
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 400;
+  letter-spacing: 0;
+  transform: translateY(-0.5px);
+}
+
+.aquarium-leva-toggle:hover,
+.aquarium-leva-toggle:focus-visible {
+  color: rgba(215, 240, 255, 0.95);
+  border-color: rgba(130, 200, 230, 0.42);
+  outline: none;
+}
+
+.aquarium-leva-toggle:active {
+  opacity: 0.88;
+}
+

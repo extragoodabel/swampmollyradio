@@ -21,12 +21,14 @@ import Seabed from './Seabed.jsx';
 import KelpForest from './KelpForest.jsx';
 import SwampSunkenCar from './SwampSunkenCar.jsx';
 import SwampSunkenFiatPanda from './SwampSunkenFiatPanda.jsx';
+import SalmonWhaleSkeleton from './SalmonWhaleSkeleton.jsx';
 import LightBeam from './LightBeam.jsx';
 import AmbientRadio from './AmbientRadio.jsx';
 import FloatingLetters from './FloatingLetters.jsx';
 import CanvasFloatingLetters from './CanvasFloatingLetters.jsx';
 import TypoEmergencyTest from './TypoEmergencyTest.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
+import { normalizeFloatingPhrase } from './letterLayout.js';
 import { useRadio } from '../audio/RadioContext.jsx';
 import { useTheme } from '../theme/ThemeContext.jsx';
 import { getTheme, resolveRadioSlotIndex } from '../theme/themes.js';
@@ -41,6 +43,7 @@ import { buildSwampSceneGates } from '../theme/swampRecovery.js';
 import AquariumEngineDebug from '../debug/AquariumEngineDebug.jsx';
 import {
   AQ_DEBUG,
+  AQ_ENGINE_HUD,
   AQ_LITE_ATMOSPHERE,
   AQ_SKIP_TYPOGRAPHY,
   AQ_TYPO_DEBUG_LOG,
@@ -114,7 +117,7 @@ export default function Scene() {
   useEffect(() => {
     if (themeId !== 'salmonDaysRadio' || salmonRestoreStep < 13) return;
     console.info(
-      '[aquarium] Salmon restore step ≥13 — credits/coin hook (no 3D asset in repo yet)',
+      '[aquarium] Salmon restore step ≥13 — SalmonWhaleSkeleton + NHM Imaging (see README)',
     );
   }, [themeId, salmonRestoreStep]);
 
@@ -674,9 +677,14 @@ export default function Scene() {
   // instead the effect below pushes fog/haze/beam/kelp moss whenever
   // `themeId` changes, so Leva and shaders track the new atmosphere.
 
+  const floatingLettersPhrase = useMemo(
+    () => normalizeFloatingPhrase(theme.letters.text ?? ''),
+    [theme.letters.text],
+  );
+
   const radioSlotIndex = useMemo(
-    () => resolveRadioSlotIndex(theme.letters.text, theme.letters.radioSlot),
-    [theme.letters.text, theme.letters.radioSlot],
+    () => resolveRadioSlotIndex(floatingLettersPhrase, theme.letters.radioSlot),
+    [floatingLettersPhrase, theme.letters.radioSlot],
   );
 
   const radioInTypography = useMemo(
@@ -726,6 +734,22 @@ export default function Scene() {
   const typographyWorldYOffset =
     Number(theme.letters.typographyWorldYOffset) || 0;
 
+  const beaconCompanionFishMerged = useMemo(() => {
+    const bc = theme.radio?.beaconCompanionFish;
+    if (!bc || bc.enabled === false) return null;
+    return {
+      ...bc,
+      mainTexture: bc.mainTexture ?? theme.fish.mainTexture,
+      riderTexture: bc.riderTexture ?? theme.fish.riderTexture,
+      textureFacesLeft: bc.textureFacesLeft ?? theme.fish.textureFacesLeft,
+    };
+  }, [
+    theme.radio?.beaconCompanionFish,
+    theme.fish.mainTexture,
+    theme.fish.riderTexture,
+    theme.fish.textureFacesLeft,
+  ]);
+
   const floatingTypographyProps = useMemo(
     () => {
       const tr = theme.letters.typographyReadability;
@@ -733,7 +757,7 @@ export default function Scene() {
       const ay = (tr?.anchor?.[1] ?? 0) + typographyWorldYOffset;
       const az = tr?.anchor?.[2] ?? 0;
       return {
-      text: theme.letters.text,
+      text: floatingLettersPhrase,
       depthSpread: letterDepthSpread,
       floatStrength: letterFloatStrength,
       shimmerStrength: letterShimmerStrength,
@@ -765,15 +789,18 @@ export default function Scene() {
       radioEmbedded: radioInTypography,
       radioGlowIntensity: safeRadioGlowIntensity,
       beaconAtmosphere: theme.radio?.beaconAtmosphere,
+      beaconVisual: theme.radio?.beaconVisual,
       typographyReadability: tr
         ? { ...tr, anchor: [ax, ay, az] }
         : tr,
       typographyTint: theme.letters.typographyTint ?? null,
       safeClampZ: 4.25,
+      beaconPlacementResetKey: themeId,
+      beaconCompanionFish: beaconCompanionFishMerged,
     };
     },
     [
-      theme.letters.text,
+      floatingLettersPhrase,
       theme.letters.letterSpacingMul,
       theme.letters.rowGapMul,
       theme.letters.intraLineYJitterMul,
@@ -785,6 +812,7 @@ export default function Scene() {
       theme.letters.typographyTint,
       theme.letters.letterMurkinessBoost,
       theme.radio?.beaconAtmosphere,
+      theme.radio?.beaconVisual,
       letterDepthSpread,
       letterFloatStrength,
       letterShimmerStrength,
@@ -806,6 +834,7 @@ export default function Scene() {
       radioInTypography,
       safeRadioGlowIntensity,
       typographyWorldYOffset,
+      beaconCompanionFishMerged,
     ],
   );
 
@@ -813,10 +842,10 @@ export default function Scene() {
     if (!AQ_TYPO_DEBUG_LOG || !mountLettersEffective) return;
     console.info('[aquarium] Scene typography', {
       activeTheme: themeId,
-      phrase: theme.letters.text,
+      phrase: floatingLettersPhrase,
       canvasFallbackDefault: !AQ_TYPO_TROIKA,
     });
-  }, [themeId, theme.letters.text, mountLettersEffective]);
+  }, [themeId, floatingLettersPhrase, mountLettersEffective]);
 
   const safeRadioPosition = useMemo(() => {
     const x = Number(radioPosition?.x);
@@ -920,6 +949,7 @@ export default function Scene() {
       satelliteSchools: 10,
       densityCloudsMidfield: 11,
       canopy: 12,
+      whaleSkeleton: 13,
     };
 
     const salmonLayerGates = {};
@@ -989,6 +1019,7 @@ export default function Scene() {
               car1: swampGates.car1,
               car2: swampGates.car2,
               car1Headlights: swampGates.car1Headlights,
+              car2Headlights: swampGates.car2Headlights,
               companions: swampGates.companions,
               density: swampGates.density,
             },
@@ -1058,13 +1089,13 @@ export default function Scene() {
     const effSpacing =
       letterSpacing * (theme.letters.letterSpacingMul ?? 1);
     return typographyFramingCameraZ(
-      theme.letters.text,
+      floatingLettersPhrase,
       effSpacing,
       camera.fov,
       size.width / Math.max(1, size.height),
     );
   }, [
-    theme.letters.text,
+    floatingLettersPhrase,
     theme.letters.letterSpacingMul,
     letterSpacing,
     camera.fov,
@@ -1072,13 +1103,33 @@ export default function Scene() {
     size.height,
   ]);
 
+  const salmonCameraZMul =
+    themeId === 'salmonDaysRadio'
+      ? Number(theme.atmosphere?.salmonInitialCameraZMul) || 1
+      : 1;
+
+  const heroSchoolBounds = useMemo(() => {
+    const hb = theme.atmosphere?.heroSchoolBounds;
+    if (
+      hb &&
+      Number.isFinite(hb.x) &&
+      Number.isFinite(hb.y) &&
+      Number.isFinite(hb.z)
+    ) {
+      return { x: hb.x, y: hb.y, z: hb.z };
+    }
+    return VOLUME;
+  }, [theme.atmosphere?.heroSchoolBounds]);
+
   const [cameraZMinLive, cameraZMaxLive] = useMemo(
     () => guardCameraRails(cameraZMin, cameraZMax),
     [cameraZMin, cameraZMax],
   );
 
   const cameraStartZRaw = THREE.MathUtils.clamp(
-    mountLettersEffective ? initialTypographyCameraZ : 4.5,
+    mountLettersEffective
+      ? initialTypographyCameraZ * salmonCameraZMul
+      : 4.5,
     cameraZMinLive + 0.5,
     cameraZMaxLive,
   );
@@ -1471,7 +1522,7 @@ export default function Scene() {
 
   return (
     <>
-      <AquariumEngineDebug enabled={AQ_DEBUG} />
+      <AquariumEngineDebug enabled={AQ_ENGINE_HUD} />
       {lights}
       <CameraRig
         // Z is chosen so the full themed letter string fits in the
@@ -1507,6 +1558,9 @@ export default function Scene() {
             overheadGlow={salmonVaultMerged.overheadGlow ?? 1}
           />
         </ErrorBoundary>
+      )}
+      {themeId === 'salmonDaysRadio' && salmonEnv.whaleSkeleton && (
+        <SalmonWhaleSkeleton fogColor={fogColor} />
       )}
       {themeId === 'salmonDaysRadio' && salmonEnv.canopy && (
         <SalmonOceanCanopy fogColor={fogColor} {...(atm?.oceanSurfaceCanopy ?? {})} />
@@ -1616,6 +1670,7 @@ export default function Scene() {
       {themeId === 'swamp' && !AQ_SCENE_MINIMAL && swampGates.car2 && (
         <ErrorBoundary fallback={null}>
           <SwampSunkenFiatPanda
+            headlightsEnabled={swampGates.car2Headlights}
             seabedY={-seabedProps.depth}
             fogNear={volumeFogNear}
             fogFar={volumeFogFar}
@@ -1725,7 +1780,7 @@ export default function Scene() {
           count: safeHeroFishCount,
           clusterCount: safeClusterCount,
           seed: 1337,
-          bounds: VOLUME,
+          bounds: heroSchoolBounds,
           spread: safeSchoolSpread,
           swimSpeed: safeSwimSpeed,
           shimmerIntensity,
@@ -1918,6 +1973,7 @@ export default function Scene() {
             glowIntensity={safeRadioGlowIntensity}
             position={safeRadioPosition}
             beaconAtmosphere={theme.radio?.beaconAtmosphere}
+            beaconVisual={theme.radio?.beaconVisual}
           />
         </ErrorBoundary>
       ) : null}
