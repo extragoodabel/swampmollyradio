@@ -9,7 +9,7 @@
  * - `?aqtypodebug=1` — console logs for typography mount / layout
  * - `?aqsceneminimal=1` — skip companion schools, sunken GLBs, salmon shadow silhouettes
  * - `?aqthemeswitchlog=1` — log theme clicks + localStorage (production-friendly)
- * - `?aqsalmonkill=vault,backdrop,...` — disable Salmon Days layers (see salmonRecovery.js)
+ * - `?aqsalmonkill=vault,backdrop,...,credits` — disable Salmon layers (`credits` → drifting credits bag).
  * - `?aqsalmonemergency=1` — Salmon Days only: minimal scene (CameraRig + 10 procedural fish; no Leva stack)
  * - `?aquariumtheme=swamp|salmonDaysRadio` — first-paint theme; aliases: swampMollyRadio→swamp; legacy `salmon` / `salmondays`→salmonDaysRadio (warns)
  * - `?aqignorestorage=1` — skip reading `aquarium-theme` from localStorage on first load (URL/default only)

@@ -28,6 +28,7 @@ import FloatingLetters from './FloatingLetters.jsx';
 import CanvasFloatingLetters from './CanvasFloatingLetters.jsx';
 import TypoEmergencyTest from './TypoEmergencyTest.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
+import FloatingCreditsBag from './FloatingCreditsBag.jsx';
 import { normalizeFloatingPhrase } from './letterLayout.js';
 import { useRadio } from '../audio/RadioContext.jsx';
 import { useTheme } from '../theme/ThemeContext.jsx';
@@ -2045,6 +2046,15 @@ export default function Scene() {
         sizeVariation={bubbleSizeVariation}
         bounds={BUBBLE_VOLUME}
       />
+      )}
+      {!AQ_SCENE_MINIMAL &&
+        ((themeId === 'swamp' && swampGates.creditsBag) ||
+          (themeId === 'salmonDaysRadio' && salmonEnv.creditsBag)) && (
+        <ErrorBoundary name="FloatingCreditsBag" fallback={null}>
+          <Suspense fallback={null}>
+            <FloatingCreditsBag themeId={themeId} />
+          </Suspense>
+        </ErrorBoundary>
       )}
       {standaloneAmbientRadioShows ? (
         <ErrorBoundary name="Scene.AmbientRadio.standalone" fallback={null}>

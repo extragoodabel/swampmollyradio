@@ -112,6 +112,7 @@ export function buildSwampSceneGates(themeId) {
       density: true,
       bubbles: true,
       extrasLog: true,
+      creditsBag: true,
     };
   }
 
@@ -140,5 +141,7 @@ export function buildSwampSceneGates(themeId) {
     companions: alive('companions', 12) && stepOk(12),
     density: alive('density', 12) && stepOk(12),
     extrasLog: stepOk(13),
+    /** In-world credits plastic bag — same restore step as extras log; `aqswampkill=credits` kills via extras. */
+    creditsBag: alive('extras', 13) && stepOk(13),
   };
 }
