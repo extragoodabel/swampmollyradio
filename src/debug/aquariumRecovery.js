@@ -16,7 +16,7 @@
  * - `?aqclearsaved=1` — before React mounts: drop `aquarium-theme`, engine ver key, and Leva localStorage keys
  * - `?aqsalmonrestore=1..13` — Salmon Days only: gate visual subsystems (see salmonRecovery `buildSalmonEnvForScene` + Scene). Omit = full stack.
  * - `?aqswamprestore=1..13` — Swamp Molly only: cumulative layers (see `theme/swampRecovery.js` + Scene). Omit = full stack.
- * - `?aqswampkill=car1,car2,headlights,haze,typography,...` — force Swamp layers off (aliases in `swampRecovery.js`).
+ * - `?aqswampkill=car1,car2,headlights,haze,typography,...,poem` — force Swamp layers off (aliases in `swampRecovery.js`).
  * - `?aqorbdebug=1` — orb/beacon mount + tap diagnostics (console).
  * - `?aqcardebug=1` — Swamp submerged cars: distance + headlight anchor logs; optional marker dots.
  * - `?aqcompaniondebug=1` — companion schools: mount diagnostics + slightly boosted visibility.

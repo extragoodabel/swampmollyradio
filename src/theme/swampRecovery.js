@@ -2,13 +2,14 @@
  * Swamp Molly — URL-driven progressive restore + layer kills (debug only).
  *
  * - `?aqswamprestore=N` (N∈1…13): cumulative layers; omit = full stack (999).
- * - `?aqswampkill=car1,car2,headlights,haze,...` — force layers off (see KILL_KEYS).
+ * - `?aqswampkill=car1,car2,headlights,haze,...,poem` — force layers off (see KILL_KEYS).
  */
 
 export const SWAMP_RESTORE_FULL = 999;
 
 const KILL_ALIASES = {
   car1: ['car1', 'vintage', 'vintagecar', 'rustycar'],
+  poem: ['poem', 'swampmollypoem', 'mollypoem', 'swampmollytext'],
   car2: ['car2', 'fiat', 'panda', 'fiatpanda'],
   headlights: ['headlights', 'headlight', 'beams'],
   vegetation: ['vegetation', 'kelp', 'seaweed', 'moss'],
@@ -101,8 +102,9 @@ export function buildSwampSceneGates(themeId) {
       seabed: true,
       kelp: true,
       lightBeam: true,
-      car1: true,
-      car2: true,
+    car1: true,
+    poem: true,
+    car2: true,
       car1Headlights: true,
       car2Headlights: true,
       typography: true,
@@ -128,6 +130,7 @@ export function buildSwampSceneGates(themeId) {
     kelp: alive('vegetation', 7) && stepOk(7),
     lightBeam: alive('lightbeam', 8) && stepOk(8),
     car1: alive('car1', 9) && stepOk(9),
+    poem: alive('car1', 9) && alive('poem', 9),
     car2: alive('car2', 10) && stepOk(10),
     car1Headlights:
       !kill.headlights && alive('car1', 9) && (!active || rs >= 11),

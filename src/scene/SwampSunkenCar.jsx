@@ -1,6 +1,6 @@
 import { Suspense, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF, useCursor } from '@react-three/drei';
 import * as THREE from 'three';
 import { AQ_CAR_DEBUG } from '../debug/aquariumRecovery.js';
 import ErrorBoundary from './ErrorBoundary.jsx';
@@ -45,13 +45,18 @@ function SwampSunkenCarLoaded({
   fogFar,
   fogColor,
   headlightsEnabled = true,
+  poemInteractable = false,
+  onVintagePoemOpenRequest,
 }) {
   const { scene } = useGLTF(RUSTY_VINTAGE_CAR_URL);
   const [carRoot, setCarRoot] = useState(null);
   const [anchors, setAnchors] = useState([]);
+  const [poemHitHover, setPoemHitHover] = useState(false);
   const frameRef = useRef(null);
   const logAcc = useRef(0);
   const { camera } = useThree();
+
+  useCursor(poemInteractable && poemHitHover);
 
   useLayoutEffect(() => {
     const fogMurk = new THREE.Color('#151210');
@@ -78,6 +83,9 @@ function SwampSunkenCarLoaded({
 
     root.updateMatrixWorld(true);
     setAnchors(collectHeadlightAnchors(root));
+    root.traverse((o) => {
+      if (o.isMesh) o.raycast = () => {};
+    });
     setCarRoot(root);
   }, [scene]);
 
@@ -112,6 +120,22 @@ function SwampSunkenCarLoaded({
     <group position={groupPos} rotation={[0, Math.PI, 0]}>
       <group ref={frameRef} scale={1.05}>
         {carRoot && <primitive object={carRoot} />}
+        {poemInteractable && (
+          <mesh
+            position={[0, 1.05, 0.1]}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              const b = e.nativeEvent?.button;
+              if (b != null && b !== 0) return;
+              onVintagePoemOpenRequest?.();
+            }}
+            onPointerOver={() => setPoemHitHover(true)}
+            onPointerOut={() => setPoemHitHover(false)}
+          >
+            <boxGeometry args={[12, 4.85, 6.55]} />
+            <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+          </mesh>
+        )}
         {carRoot && headlightsEnabled && (
           <SubmergedHeadlights
             anchors={adjustedAnchors}
@@ -148,6 +172,8 @@ function SwampSunkenCarLoaded({
  *   fogFar: number;
  *   fogColor: string;
  *   headlightsEnabled?: boolean;
+ *   poemInteractable?: boolean;
+ *   onVintagePoemOpenRequest?: () => void;
  * }} props
  */
 export default function SwampSunkenCar(props) {

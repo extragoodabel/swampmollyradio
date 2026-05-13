@@ -1,5 +1,5 @@
 import { useThree } from '@react-three/fiber';
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useControls, folder, button } from 'leva';
 import * as THREE from 'three';
 import CameraRig from './CameraRig.jsx';
@@ -21,6 +21,10 @@ import Seabed from './Seabed.jsx';
 import KelpForest from './KelpForest.jsx';
 import SwampSunkenCar from './SwampSunkenCar.jsx';
 import SwampSunkenFiatPanda from './SwampSunkenFiatPanda.jsx';
+import SwampMollyPoem, {
+  SwampFloatingWaterWords,
+} from './SwampMollyPoem.jsx';
+import SwampPoemRevealArrowCue from './SwampPoemRevealArrowCue.jsx';
 import SalmonWhaleSkeleton from './SalmonWhaleSkeleton.jsx';
 import LightBeam from './LightBeam.jsx';
 import AmbientRadio from './AmbientRadio.jsx';
@@ -41,6 +45,7 @@ import {
   SALMON_RESTORE_FULL,
 } from '../theme/salmonRecovery.js';
 import { buildSwampSceneGates } from '../theme/swampRecovery.js';
+import { STUDIO_CREDIT_LINE_RAW } from '../content/studioCreditLine.js';
 import AquariumEngineDebug from '../debug/AquariumEngineDebug.jsx';
 import {
   AQ_DEBUG,
@@ -114,6 +119,17 @@ export default function Scene() {
     [themeId],
   );
   const swampGates = useMemo(() => buildSwampSceneGates(themeId), [themeId]);
+  const [swampPoemOpen, setSwampPoemOpen] = useState(false);
+  const [swampFiatCreditOpen, setSwampFiatCreditOpen] = useState(false);
+  const [swampPoemArrowCue, setSwampPoemArrowCue] = useState(false);
+
+  useEffect(() => {
+    if (themeId !== 'swamp') {
+      setSwampPoemOpen(false);
+      setSwampFiatCreditOpen(false);
+      setSwampPoemArrowCue(false);
+    }
+  }, [themeId]);
 
   useEffect(() => {
     if (themeId !== 'salmonDaysRadio' || salmonRestoreStep < 13) return;
@@ -1091,6 +1107,7 @@ export default function Scene() {
               kelp: swampGates.kelp,
               lightBeam: swampGates.lightBeam,
               car1: swampGates.car1,
+              poem: swampGates.poem,
               car2: swampGates.car2,
               car1Headlights: swampGates.car1Headlights,
               car2Headlights: swampGates.car2Headlights,
@@ -1461,6 +1478,28 @@ export default function Scene() {
     ...(atm?.seabed ?? {}),
   };
 
+  const swampPoemWorldPosition = useMemo(() => {
+    const floorY = -seabedProps.depth + 0.22;
+    return [-3.15, floorY + 2.55, 68.4];
+  }, [seabedProps.depth]);
+
+  const swampPoemCueFrom = useMemo(() => {
+    const floorY = -seabedProps.depth + 0.22;
+    return [-4.45, floorY + 1.35, 71];
+  }, [seabedProps.depth]);
+
+  const swampFiatCreditWorldPosition = useMemo(() => {
+    const floorY = -seabedProps.depth + 0.22;
+    /* Fiat `groupPos` is [42, floorY - 0.78, 63] — anchor credits above roof, same X/Z. */
+    return [42, floorY + 3.45, 63];
+  }, [seabedProps.depth]);
+
+  const poemMurkiness = useMemo(
+    () =>
+      Math.min(1, letterMurkiness + (theme.letters.letterMurkinessBoost ?? 0)),
+    [letterMurkiness, theme.letters.letterMurkinessBoost],
+  );
+
   const dustAtm = atm?.dustParticles ?? {};
   const waterHazeAtm = atm?.waterHaze ?? {};
   const salmonVaultMerged = useMemo(() => {
@@ -1738,8 +1777,33 @@ export default function Scene() {
             fogNear={volumeFogNear}
             fogFar={volumeFogFar}
             fogColor={fogColor}
+            poemInteractable={swampGates.poem}
+            onVintagePoemOpenRequest={() => {
+              setSwampPoemOpen(true);
+              setSwampPoemArrowCue(true);
+            }}
           />
         </ErrorBoundary>
+      )}
+      {themeId === 'swamp' &&
+        !AQ_SCENE_MINIMAL &&
+        swampGates.poem &&
+        swampPoemOpen && (
+        <ErrorBoundary fallback={null}>
+          <SwampMollyPoem
+            position={swampPoemWorldPosition}
+            murkiness={poemMurkiness}
+            typographyTint={theme.letters.typographyTint ?? null}
+            onDissipated={() => setSwampPoemOpen(false)}
+          />
+        </ErrorBoundary>
+      )}
+      {themeId === 'swamp' && swampPoemArrowCue && (
+        <SwampPoemRevealArrowCue
+          from={swampPoemCueFrom}
+          to={swampPoemWorldPosition}
+          onComplete={() => setSwampPoemArrowCue(false)}
+        />
       )}
       {themeId === 'swamp' && !AQ_SCENE_MINIMAL && swampGates.car2 && (
         <ErrorBoundary fallback={null}>
@@ -1749,6 +1813,26 @@ export default function Scene() {
             fogNear={volumeFogNear}
             fogFar={volumeFogFar}
             fogColor={fogColor}
+            creditInteractable={swampGates.car2}
+            onFiatCreditOpenRequest={() => setSwampFiatCreditOpen(true)}
+          />
+        </ErrorBoundary>
+      )}
+      {themeId === 'swamp' &&
+        !AQ_SCENE_MINIMAL &&
+        swampGates.car2 &&
+        swampFiatCreditOpen && (
+        <ErrorBoundary fallback={null}>
+          <SwampFloatingWaterWords
+            contentKey="fiat-credit"
+            rawText={STUDIO_CREDIT_LINE_RAW}
+            position={swampFiatCreditWorldPosition}
+            murkiness={poemMurkiness}
+            typographyTint={theme.letters.typographyTint ?? null}
+            scale={2}
+            floatStrength={0.008}
+            volumeDepth={3.2}
+            onDissipated={() => setSwampFiatCreditOpen(false)}
           />
         </ErrorBoundary>
       )}

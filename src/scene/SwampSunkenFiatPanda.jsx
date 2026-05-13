@@ -1,6 +1,6 @@
 import { Suspense, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF, useCursor } from '@react-three/drei';
 import * as THREE from 'three';
 import { AQ_CAR_DEBUG } from '../debug/aquariumRecovery.js';
 import ErrorBoundary from './ErrorBoundary.jsx';
@@ -280,15 +280,20 @@ function FiatCarDebugDots({ anchors }) {
 function SwampSunkenFiatPandaLoaded({
   headlightsEnabled = true,
   seabedY = -12,
+  creditInteractable = false,
+  onFiatCreditOpenRequest,
 }) {
   const { scene } = useGLTF(FIAT_PANDA_4X4_URL);
   const [carRoot, setCarRoot] = useState(null);
+  const [creditHitHover, setCreditHitHover] = useState(false);
   const frameRef = useRef(null);
   const outerGroupRef = useRef(null);
   const carObjRef = useRef(null);
   const fiatLampsAttachRef = useRef(null);
   const logAcc = useRef(0);
   const { camera } = useThree();
+
+  useCursor(creditInteractable && creditHitHover);
 
   const anchors = useMemo(() => fiatHeadlightAnchors(), []);
 
@@ -430,6 +435,22 @@ function SwampSunkenFiatPandaLoaded({
         {carRoot && (
           <>
             <primitive object={carRoot} ref={carObjRef} />
+            {creditInteractable && (
+              <mesh
+                position={[0, 0.52, 0.05]}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  const b = e.nativeEvent?.button;
+                  if (b != null && b !== 0) return;
+                  onFiatCreditOpenRequest?.();
+                }}
+                onPointerOver={() => setCreditHitHover(true)}
+                onPointerOut={() => setCreditHitHover(false)}
+              >
+                <boxGeometry args={[5.2, 2.05, 2.85]} />
+                <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+              </mesh>
+            )}
             <group ref={fiatLampsAttachRef}>
               {headlightsEnabled && <FiatManualHeadlightCones />}
               {AQ_CAR_DEBUG && <FiatCarDebugDots anchors={anchors} />}
@@ -448,6 +469,8 @@ function SwampSunkenFiatPandaLoaded({
  *   fogNear?: number;
  *   fogFar?: number;
  *   fogColor?: string;
+ *   creditInteractable?: boolean;
+ *   onFiatCreditOpenRequest?: () => void;
  * }} props
  */
 export default function SwampSunkenFiatPanda(props) {
