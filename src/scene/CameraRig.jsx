@@ -3,6 +3,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useRadio } from '../audio/RadioContext.jsx';
 import { AQ_TOUCH_DEBUG } from '../debug/aquariumRecovery.js';
+import {
+  emitCameraAway,
+  registerCameraReset,
+} from './cameraReturnBridge.js';
 
 function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
@@ -192,6 +196,8 @@ export default function CameraRig({
 
   const prevAnchorKey = useRef(anchorResetKey);
 
+  const awayPrevRef = useRef(false);
+
   const defaultVerticalComfort = useMemo(
     () => ({
       comfortY: 0,
@@ -207,6 +213,7 @@ export default function CameraRig({
 
   const propsRef = useRef({});
   propsRef.current = {
+    basePosition,
     dragSensitivity,
     dragDamping,
     inertiaStrength,
@@ -220,6 +227,26 @@ export default function CameraRig({
     boundsMax,
     verticalComfort: { ...defaultVerticalComfort, ...verticalComfort },
   };
+
+  useLayoutEffect(() => {
+    const reset = () => {
+      const bp = tripletFromBounds(basePosition, 0, 0, 6);
+      rigPosition.current.set(bp[0], bp[1], bp[2]);
+      driftVelocity.current.set(0, 0, 0);
+      yaw.current = 0;
+      pitch.current = 0;
+      yawVelocity.current = 0;
+      pitchVelocity.current = 0;
+      multiTouchRef.current.inited = false;
+      targetPosition.current.set(bp[0], bp[1], bp[2]);
+      camera.position.set(bp[0], bp[1], bp[2]);
+      eulerScratch.current.set(0, 0, 0, 'YXZ');
+      camera.quaternion.setFromEuler(eulerScratch.current);
+      awayPrevRef.current = false;
+      emitCameraAway(false);
+    };
+    return registerCameraReset(reset);
+  }, [basePosition, camera]);
 
   useEffect(() => {
     camera.rotation.order = 'YXZ';
@@ -717,6 +744,22 @@ export default function CameraRig({
       boundsMinScratch.current,
       boundsMaxScratch.current,
     );
+
+    const bpAway = tripletFromBounds(p.basePosition, 0, 0, 6);
+    const awayDx = rigPosition.current.x - bpAway[0];
+    const awayDy = rigPosition.current.y - bpAway[1];
+    const awayDz = rigPosition.current.z - bpAway[2];
+    const awayDist = Math.sqrt(
+      awayDx * awayDx + awayDy * awayDy + awayDz * awayDz,
+    );
+    const awayFromStart =
+      awayDist > 0.52 ||
+      Math.abs(yaw.current) > 0.055 ||
+      Math.abs(pitch.current) > 0.055;
+    if (awayFromStart !== awayPrevRef.current) {
+      awayPrevRef.current = awayFromStart;
+      emitCameraAway(awayFromStart);
+    }
 
     if (AQ_TOUCH_DEBUG) {
       const td = touchDebugRef.current;

@@ -8,13 +8,13 @@ import {
 import { Canvas } from '@react-three/fiber';
 import { Leva } from 'leva';
 import Scene from './scene/Scene.jsx';
-import { RadioProvider } from './audio/RadioContext.jsx';
+import { RadioProvider, useRadio } from './audio/RadioContext.jsx';
 import RadioOverlay from './ui/RadioOverlay.jsx';
 import ThemeModeControl from './ui/ThemeModeControl.jsx';
 import ThemeCrossfade from './ui/ThemeCrossfade.jsx';
 import { ThemeProvider, useTheme } from './theme/ThemeContext.jsx';
 import ThemeSceneErrorBoundary from './theme/ThemeSceneErrorBoundary.jsx';
-import { WorldTransitionProvider } from './ui/WorldTransitionContext.jsx';
+import { WorldTransitionProvider, useAquariumWorldTransition } from './ui/WorldTransitionContext.jsx';
 import { THEME_VER_KEY } from './theme/salmonRecovery.js';
 import {
   AQ_DEBUG,
@@ -24,6 +24,36 @@ import {
 } from './debug/aquariumRecovery.js';
 import CanvasClearToTheme from './scene/CanvasClearToTheme.jsx';
 import SceneSalmonEmergency from './scene/SceneSalmonEmergency.jsx';
+import {
+  requestCameraReset,
+  subscribeCameraAway,
+} from './scene/cameraReturnBridge.js';
+
+/** Lives under `RadioProvider` so reset can pause playback without lifting hooks. */
+function OverlayHintColumn({ hint, showReset }) {
+  const { pause } = useRadio();
+  const { withMurkTransition } = useAquariumWorldTransition();
+  return (
+    <div className="overlay__hint-col">
+      {showReset ? (
+        <button
+          type="button"
+          className="overlay__return-start"
+          aria-label="Reset camera to opening view and stop radio"
+          onClick={() => {
+            void withMurkTransition(async () => {
+              pause();
+              requestCameraReset();
+            });
+          }}
+        >
+          reset
+        </button>
+      ) : null}
+      <div className="overlay__hint">{hint}</div>
+    </div>
+  );
+}
 
 /**
  * Top-level shell.
@@ -86,6 +116,9 @@ function ThemedShell() {
   const [levaOpen, setLevaOpen] = useState(false);
   const levaToggleRef = useRef(null);
   const [levaTitlePos, setLevaTitlePos] = useState({ x: 0, y: 54 });
+  const [cameraAwayFromStart, setCameraAwayFromStart] = useState(false);
+
+  useEffect(() => subscribeCameraAway(setCameraAwayFromStart), []);
 
   const syncLevaPanelDock = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -344,7 +377,7 @@ function ThemedShell() {
         <div className="overlay__title">{theme.overlayLabel}</div>
         <div className="overlay__bottom">
           <ThemeModeControl />
-          <div className="overlay__hint">{theme.hint}</div>
+          <OverlayHintColumn hint={theme.hint} showReset={cameraAwayFromStart} />
         </div>
       </div>
       <RadioOverlay />

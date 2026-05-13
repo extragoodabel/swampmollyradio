@@ -66,7 +66,7 @@ export function WorldTransitionProvider({ children }) {
   murkRef.current = murk;
 
   const rafRef = useRef(null);
-  const switchLockRef = useRef(false);
+  const transitionLockRef = useRef(false);
 
   const cancelMurkAnim = useCallback(() => {
     if (rafRef.current != null) {
@@ -124,12 +124,12 @@ export function WorldTransitionProvider({ children }) {
   const switchTheme = useCallback(
     async (nextId) => {
       if (!THEME_IDS.includes(nextId) || nextId === themeId) return;
-      if (switchLockRef.current) return;
+      if (transitionLockRef.current) return;
       if (AQ_NO_TRANSITION) {
         setTheme(nextId);
         return;
       }
-      switchLockRef.current = true;
+      transitionLockRef.current = true;
       try {
         await animateMurkTo(1, 420);
         setTheme(nextId);
@@ -138,13 +138,45 @@ export function WorldTransitionProvider({ children }) {
         });
         await animateMurkTo(0, 1150);
       } finally {
-        switchLockRef.current = false;
+        transitionLockRef.current = false;
       }
     },
     [animateMurkTo, setTheme, themeId],
   );
 
-  const value = useMemo(() => ({ switchTheme }), [switchTheme]);
+  /**
+   * Same murk in → action → murk out as theme switch (e.g. camera reset).
+   */
+  const withMurkTransition = useCallback(
+    async (fn) => {
+      if (typeof fn !== 'function') return;
+      if (AQ_NO_TRANSITION) {
+        await fn();
+        return;
+      }
+      if (transitionLockRef.current) {
+        await fn();
+        return;
+      }
+      transitionLockRef.current = true;
+      try {
+        await animateMurkTo(1, 420);
+        await fn();
+        await new Promise((r) => {
+          window.setTimeout(r, 48);
+        });
+        await animateMurkTo(0, 1150);
+      } finally {
+        transitionLockRef.current = false;
+      }
+    },
+    [animateMurkTo],
+  );
+
+  const value = useMemo(
+    () => ({ switchTheme, withMurkTransition }),
+    [switchTheme, withMurkTransition],
+  );
 
   return (
     <WorldTransitionCtx.Provider value={value}>
