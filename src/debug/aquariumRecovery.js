@@ -23,6 +23,8 @@
  * - `?aqcompaniondebug=1` — companion schools: mount diagnostics + slightly boosted visibility.
  * - `?aqtouchdebug=1` — CameraRig: touch pinch/pan / rotate gesture diagnostics (console).
  * - `?aqpoemdebug=1` — Swamp Molly poem rebuild: mount flags + trigger/heartbeat + wireframe helpers (console).
+ * - `?aqpoemfreeze=1` — Swamp Molly poem dissipation: freeze at end of panel/particle handoff for alignment inspection (requires trigger + debug visuals optional via aqpoemdebug).
+ * - `?aqpoemfreezeplain=1` — With freeze/debug: particle tint off (white multiplier) so overlaid letters match poem fill for overlap checks.
  * - `?aqnotransition=1` — skip underwater reveal + world-switch murk (debug).
  */
 
@@ -108,6 +110,14 @@ export const AQ_TOUCH_DEBUG =
 export const AQ_POEM_DEBUG =
   params.has('aqpoemdebug') ||
   import.meta.env.VITE_AQ_POEM_DEBUG === '1';
+
+/** Swamp Molly poem: freeze dissipation after handoff for column/particle alignment checks (`?aqpoemfreeze=1`). */
+export const AQ_POEM_FREEZE =
+  params.has('aqpoemfreeze') || import.meta.env.VITE_AQ_POEM_FREEZE === '1';
+
+/** With aqpoemfreeze + aqpoemdebug: disable column tint on particles for pure overlap vs panel (`?aqpoemfreezeplain=1`). */
+export const AQ_POEM_FREEZE_PLAIN =
+  params.has('aqpoemfreezeplain') || import.meta.env.VITE_AQ_POEM_FREEZE_PLAIN === '1';
 
 /**
  * Verbose theme click / persistence logging (also enabled whenever AQ_THEME_DEBUG is on).

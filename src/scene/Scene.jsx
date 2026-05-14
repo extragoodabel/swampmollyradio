@@ -1926,6 +1926,8 @@ export default function Scene() {
               seabedDepth={seabedProps.depth}
               murkiness={poemMurkiness}
               typographyTint={theme.letters.typographyTint ?? null}
+              poemPresent={swampPoemPresent}
+              poemGateOn={swampGates.poem}
               onDissipated={() => setSwampPoemPresent(false)}
             />
           ) : (
