@@ -22,7 +22,7 @@
  * - `?aqcarinfodebug=1` — rusty car Girl Noise Press: click + reveal state + sign mount (console).
  * - `?aqcompaniondebug=1` — companion schools: mount diagnostics + slightly boosted visibility.
  * - `?aqtouchdebug=1` — CameraRig: touch pinch/pan / rotate gesture diagnostics (console).
- * - `?aqpoemdebug=1` — Swamp Molly poem: dissipation trigger diagnostics + wireframe trigger volume (console).
+ * - `?aqpoemdebug=1` — Swamp Molly poem rebuild: mount flags + trigger/heartbeat + wireframe helpers (console).
  * - `?aqnotransition=1` — skip underwater reveal + world-switch murk (debug).
  */
 

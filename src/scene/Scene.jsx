@@ -24,6 +24,8 @@ import SwampSunkenFiatPanda from './SwampSunkenFiatPanda.jsx';
 import SwampMollyPoem, {
   SwampFloatingWaterWords,
 } from './SwampMollyPoem.jsx';
+import SwampMollyPoemRebuild from './SwampMollyPoemRebuild.jsx';
+import { USE_SWAMP_POEM_REBUILD } from './swampMollyPoemRebuildFlags.js';
 import SwampHacklesHtmlPanel from './SwampHacklesHtmlPanel.jsx';
 import { rustyCarInteractRef } from './rustyCarClickBridge.js';
 import {
@@ -1919,13 +1921,22 @@ export default function Scene() {
         swampGates.poem &&
         swampPoemPresent && (
         <ErrorBoundary fallback={null}>
-          <SwampMollyPoem
-            position={swampPoemWorldPosition}
-            rotation={swampPoemRotation}
-            murkiness={poemMurkiness}
-            typographyTint={theme.letters.typographyTint ?? null}
-            onDissipated={() => setSwampPoemPresent(false)}
-          />
+          {USE_SWAMP_POEM_REBUILD ? (
+            <SwampMollyPoemRebuild
+              seabedDepth={seabedProps.depth}
+              murkiness={poemMurkiness}
+              typographyTint={theme.letters.typographyTint ?? null}
+              onDissipated={() => setSwampPoemPresent(false)}
+            />
+          ) : (
+            <SwampMollyPoem
+              position={swampPoemWorldPosition}
+              rotation={swampPoemRotation}
+              murkiness={poemMurkiness}
+              typographyTint={theme.letters.typographyTint ?? null}
+              onDissipated={() => setSwampPoemPresent(false)}
+            />
+          )}
         </ErrorBoundary>
       )}
       {themeId === 'swamp' && !AQ_SCENE_MINIMAL && swampGates.car2 && (
