@@ -2,7 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { SWAMP_MOLLY_POEM_RAW } from '../content/swampMollyPoem.js';
-import { AQ_POEM_DEBUG, AQ_POEM_FREEZE, AQ_POEM_FREEZE_PLAIN } from '../debug/aquariumRecovery.js';
+import {
+  AQ_POEM_DEBUG,
+  AQ_POEM_DEBUG_HELPERS,
+  AQ_POEM_FLOAT_TEST,
+  AQ_POEM_MOTION_TEST,
+  AQ_POEM_FREEZE,
+  AQ_POEM_FREEZE_PLAIN,
+} from '../debug/aquariumRecovery.js';
 import {
   SWAMP_POEM_CONTACT_STAGGER_SCALE,
   SWAMP_POEM_DISCOVERY_FADE_CURVE,
@@ -15,7 +22,10 @@ import {
   SWAMP_POEM_FLOAT_BOB_AMOUNT,
   SWAMP_POEM_FLOAT_DRIFT_AMOUNT,
   SWAMP_POEM_FLOAT_ENABLED,
-  SWAMP_POEM_FLOAT_ROTATION_AMOUNT,
+  SWAMP_POEM_FLOAT_PITCH_AMOUNT,
+  SWAMP_POEM_FLOAT_ROLL_AMOUNT,
+  SWAMP_POEM_FLOAT_SPEED,
+  SWAMP_POEM_FLOAT_YAW_AMOUNT,
   SWAMP_POEM_HANDOFF_HOLD_SECONDS,
   SWAMP_POEM_LETTER_DRIFT_AMOUNT,
   SWAMP_POEM_LETTER_EARLY_DRIFT_RAMP_SEC,
@@ -27,9 +37,18 @@ import {
   SWAMP_POEM_LINE_HEIGHT_MUL,
   SWAMP_POEM_BODY_FONT_PX,
   SWAMP_POEM_DPR,
+  SWAMP_POEM_ENABLE_FLOAT_SHIMMER,
   SWAMP_POEM_MUCK_FADE_END_BELOW_FLOOR,
   SWAMP_POEM_MUCK_FADE_START_ABOVE_FLOOR,
   SWAMP_POEM_PANEL_DEPTH_STAGGER,
+  SWAMP_POEM_PANEL_IDLE_MOTION_ENABLED,
+  SWAMP_POEM_PANEL_BOB_Y_AMOUNT,
+  SWAMP_POEM_PANEL_DRIFT_X_AMOUNT,
+  SWAMP_POEM_PANEL_DRIFT_Z_AMOUNT,
+  SWAMP_POEM_PANEL_MOTION_PHASE_LEFT,
+  SWAMP_POEM_PANEL_MOTION_PHASE_RIGHT,
+  SWAMP_POEM_PANEL_MOTION_SPEED,
+  SWAMP_POEM_PANEL_ROT_Z_AMOUNT,
   SWAMP_POEM_PANEL_TO_PARTICLE_CROSSFADE_SECONDS,
   SWAMP_POEM_PANEL_Y_BIAS,
   SWAMP_POEM_PARTICLE_BASELINE_NUDGE_Y,
@@ -48,6 +67,12 @@ import {
   SWAMP_POEM_REVEAL_MAX_OPACITY,
   SWAMP_POEM_REVEAL_SMOOTHING,
   SWAMP_POEM_REVEAL_START_DISTANCE,
+  SWAMP_POEM_SHIMMER_AMOUNT,
+  SWAMP_POEM_SHIMMER_ENABLED,
+  SWAMP_POEM_SHIMMER_OPACITY_FLOOR,
+  SWAMP_POEM_SHIMMER_PHASE_LEFT,
+  SWAMP_POEM_SHIMMER_PHASE_RIGHT,
+  SWAMP_POEM_SHIMMER_SPEED,
   SWAMP_POEM_TRIGGER_CENTER_OFFSET,
   SWAMP_POEM_TRIGGER_HALF_DEPTH,
   SWAMP_POEM_TRIGGER_HALF_HEIGHT,
@@ -76,6 +101,8 @@ const _particleWorld = new THREE.Vector3();
 const _homeTmp = new THREE.Vector3();
 const _panelCornerA = new THREE.Vector3();
 const _panelCornerB = new THREE.Vector3();
+const _panelShimmerColor = new THREE.Color(1, 1, 1);
+const _flickerShimmerColor = new THREE.Color(1, 1, 1);
 
 /** Panel-local XY on column group's Z=0 plane → Swamp poem float-group local (matches column `<group>` + plane mesh). */
 function poemCharHomeInFloatSpace(columnGroup, floatGroup, panelLocalX, panelLocalY, panelLocalZ, target) {
@@ -141,14 +168,20 @@ function letterTextureMatchingPanel(opts) {
   ctx.textAlign = 'center';
   ctx.font = swampPoemRebuildCanvasFont(fontPx, italic);
   ctx.fillStyle = fillHex;
-  ctx.shadowColor = 'rgba(8, 32, 28, 0.55)';
-  ctx.shadowBlur = 3.5;
-  ctx.shadowOffsetX = 0.8;
-  ctx.shadowOffsetY = 1.1;
+  ctx.shadowColor = 'rgba(105, 188, 175, 0.48)';
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetX = 0.4;
+  ctx.shadowOffsetY = 1.0;
+  ctx.fillText(char, padX + glyphWidthPx * 0.5, cssH * 0.5);
+  ctx.shadowColor = 'rgba(14, 48, 42, 0.55)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetX = 0.95;
+  ctx.shadowOffsetY = 1.4;
   ctx.fillText(char, padX + glyphWidthPx * 0.5, cssH * 0.5);
   ctx.shadowBlur = 0;
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = 0;
+  ctx.fillText(char, padX + glyphWidthPx * 0.5, cssH * 0.5);
 
   const map = new THREE.CanvasTexture(cnv);
   map.colorSpace = THREE.SRGBColorSpace;
@@ -190,6 +223,9 @@ export default function SwampMollyPoemRebuild({
   const floatFrozenRef = useRef(false);
   const floatSnapPosRef = useRef(new THREE.Vector3());
   const floatSnapRotRef = useRef(new THREE.Euler());
+  const panelFloatFrozenRef = useRef(false);
+  const panelSnapPosRef = useRef(/** @type {THREE.Vector3[]} */ ([]));
+  const panelSnapRotRef = useRef(/** @type {THREE.Euler[]} */ ([]));
   const letterStaggerRangeRef = useRef({ min: 0, max: 0 });
   const dissipationRevealLatchRef = useRef(0);
   /** @type {React.MutableRefObject<{
@@ -299,8 +335,15 @@ export default function SwampMollyPoemRebuild({
 
   const { panels, bounds, layoutMeta, dissipationCharCells } = layout;
 
+  const flickerHostPlaneIndex = useMemo(
+    () => panels.findIndex((p) => Boolean(p.flickerOverlay)),
+    [panels],
+  );
+
   useLayoutEffect(() => {
     panelMatRefs.current = new Array(panels.length);
+    panelSnapPosRef.current = Array.from({ length: panels.length }, () => new THREE.Vector3());
+    panelSnapRotRef.current = Array.from({ length: panels.length }, () => new THREE.Euler());
   }, [panels.length]);
 
   useEffect(() => {
@@ -340,6 +383,7 @@ export default function SwampMollyPoemRebuild({
     dissipationReasonRef.current = null;
     dissTRef.current = 0;
     floatFrozenRef.current = false;
+    panelFloatFrozenRef.current = false;
     dissipateMotionLogAccRef.current = 0;
   }, [murkiness, typographyTint, seabedDepth]);
 
@@ -389,6 +433,16 @@ export default function SwampMollyPoemRebuild({
       floatSnapRotRef.current.copy(grp.rotation);
       grp.position.copy(floatSnapPosRef.current);
       grp.rotation.copy(floatSnapRotRef.current);
+      panelFloatFrozenRef.current = true;
+      for (let pi = 0; pi < panels.length; pi += 1) {
+        const col = columnGroupRefs.current[pi];
+        const sp = panelSnapPosRef.current[pi];
+        const sr = panelSnapRotRef.current[pi];
+        if (col && sp && sr) {
+          sp.copy(col.position);
+          sr.copy(col.rotation);
+        }
+      }
       freezeAlignmentLoggedRef.current = false;
       setLifecycle('dissipating');
 
@@ -580,6 +634,15 @@ export default function SwampMollyPoemRebuild({
 
         console.info('[aqpoemdebug] dissipationStart', {
           dissipationStartReason: reason,
+          floatSnapPosition: floatSnapPosRef.current.toArray(),
+          floatSnapRotation: [floatSnapRotRef.current.x, floatSnapRotRef.current.y, floatSnapRotRef.current.z],
+          panelSnapFloatLocal: panels.map((_, pi) => ({
+            planeIndex: pi,
+            position: panelSnapPosRef.current[pi]?.toArray() ?? null,
+            rotation: panelSnapRotRef.current[pi]
+              ? [panelSnapRotRef.current[pi].x, panelSnapRotRef.current[pi].y, panelSnapRotRef.current[pi].z]
+              : null,
+          })),
           aqpoemfreezeActive: AQ_POEM_FREEZE,
           aqpoemfreezeplainActive: AQ_POEM_FREEZE_PLAIN,
           freezePhase: AQ_POEM_FREEZE ? 'alignment' : null,
@@ -741,23 +804,80 @@ export default function SwampMollyPoemRebuild({
 
   useFrame((state, dt) => {
     const elapsed = state.clock.elapsedTime;
+    const motionExperimentActive = SWAMP_POEM_ENABLE_FLOAT_SHIMMER && AQ_POEM_MOTION_TEST;
+    const floatExperimentActive = motionExperimentActive && SWAMP_POEM_FLOAT_ENABLED;
+    const shimmerExperimentActive = motionExperimentActive && SWAMP_POEM_SHIMMER_ENABLED;
+    const floatTestMul = motionExperimentActive && AQ_POEM_FLOAT_TEST ? 4 : 1;
+    const shimmerTestMul = motionExperimentActive && AQ_POEM_FLOAT_TEST ? 3 : 1;
+    const effShimmerAmount = motionExperimentActive ? SWAMP_POEM_SHIMMER_AMOUNT * shimmerTestMul : 0;
     const floatGrp = floatGroupRef.current;
     if (floatGrp && floatFrozenRef.current) {
       floatGrp.position.copy(floatSnapPosRef.current);
       floatGrp.rotation.copy(floatSnapRotRef.current);
-    } else if (floatGrp && SWAMP_POEM_FLOAT_ENABLED) {
-      const bob = SWAMP_POEM_FLOAT_BOB_AMOUNT * Math.sin(elapsed * 0.55);
-      const driftX = SWAMP_POEM_FLOAT_DRIFT_AMOUNT * Math.sin(elapsed * 0.23 + 0.72);
+    } else if (floatGrp && motionExperimentActive && SWAMP_POEM_FLOAT_ENABLED) {
+      const ft = elapsed * SWAMP_POEM_FLOAT_SPEED;
+      const bob = SWAMP_POEM_FLOAT_BOB_AMOUNT * Math.sin(ft * 0.55) * floatTestMul;
+      const driftX = SWAMP_POEM_FLOAT_DRIFT_AMOUNT * Math.sin(ft * 0.23 + 0.72) * floatTestMul;
       const driftZ =
-        SWAMP_POEM_FLOAT_DRIFT_AMOUNT * 0.64 * Math.cos(elapsed * 0.19 + 1.85);
-      const yaw = SWAMP_POEM_FLOAT_ROTATION_AMOUNT * Math.sin(elapsed * 0.31 + 0.41);
-      const pitch = SWAMP_POEM_FLOAT_ROTATION_AMOUNT * 0.55 * Math.sin(elapsed * 0.27 + 2.05);
-      const roll = SWAMP_POEM_FLOAT_ROTATION_AMOUNT * 0.76 * Math.cos(elapsed * 0.21 + 0.79);
+        SWAMP_POEM_FLOAT_DRIFT_AMOUNT * 0.64 * Math.cos(ft * 0.19 + 1.85) * floatTestMul;
+      const yaw = SWAMP_POEM_FLOAT_YAW_AMOUNT * Math.sin(ft * 0.31 + 0.41) * floatTestMul;
+      const pitch = SWAMP_POEM_FLOAT_PITCH_AMOUNT * Math.sin(ft * 0.27 + 2.05) * floatTestMul;
+      const roll = SWAMP_POEM_FLOAT_ROLL_AMOUNT * Math.cos(ft * 0.21 + 0.79) * floatTestMul;
       floatGrp.position.set(driftX, bob, driftZ);
       floatGrp.rotation.set(pitch, yaw, roll);
-    } else if (floatGrp && !SWAMP_POEM_FLOAT_ENABLED) {
+    } else if (floatGrp) {
       floatGrp.position.set(0, 0, 0);
       floatGrp.rotation.set(0, 0, 0);
+    }
+
+    if (floatGrp) {
+      if (panelFloatFrozenRef.current) {
+        for (let pi = 0; pi < panels.length; pi += 1) {
+          const col = columnGroupRefs.current[pi];
+          const sp = panelSnapPosRef.current[pi];
+          const sr = panelSnapRotRef.current[pi];
+          if (col && sp && sr) {
+            col.position.copy(sp);
+            col.rotation.copy(sr);
+          }
+        }
+      } else if (motionExperimentActive && SWAMP_POEM_PANEL_IDLE_MOTION_ENABLED) {
+        for (let pi = 0; pi < panels.length; pi += 1) {
+          const p = panels[pi];
+          const col = columnGroupRefs.current[pi];
+          if (!col) continue;
+          const colBias = p.column === 'left' ? SWAMP_POEM_PANEL_Y_BIAS : -SWAMP_POEM_PANEL_Y_BIAS;
+          const baseZ =
+            p.column === 'left' || p.planeIndex === 0
+              ? -SWAMP_POEM_PANEL_DEPTH_STAGGER * 0.5
+              : SWAMP_POEM_PANEL_DEPTH_STAGGER * 0.5;
+          const baseX = p.offsetX ?? 0;
+          const baseY = (p.stackY ?? 0) + colBias;
+          const ph = pi === 0 ? SWAMP_POEM_PANEL_MOTION_PHASE_LEFT : SWAMP_POEM_PANEL_MOTION_PHASE_RIGHT;
+          const pm = elapsed * SWAMP_POEM_PANEL_MOTION_SPEED + ph;
+          const bob = SWAMP_POEM_PANEL_BOB_Y_AMOUNT * Math.sin(pm * 0.41) * floatTestMul;
+          const dz = SWAMP_POEM_PANEL_DRIFT_Z_AMOUNT * Math.sin(pm * 0.33 + 1.1) * floatTestMul;
+          const dx = SWAMP_POEM_PANEL_DRIFT_X_AMOUNT * Math.sin(pm * 0.29 + 0.55) * floatTestMul;
+          const rz = SWAMP_POEM_PANEL_ROT_Z_AMOUNT * Math.sin(pm * 0.37 + 0.2) * floatTestMul;
+          col.position.set(baseX + dx, baseY + bob, baseZ + dz);
+          col.rotation.set(0, 0, rz);
+        }
+      } else {
+        for (let pi = 0; pi < panels.length; pi += 1) {
+          const p = panels[pi];
+          const col = columnGroupRefs.current[pi];
+          if (!col) continue;
+          const colBias = p.column === 'left' ? SWAMP_POEM_PANEL_Y_BIAS : -SWAMP_POEM_PANEL_Y_BIAS;
+          const baseZ =
+            p.column === 'left' || p.planeIndex === 0
+              ? -SWAMP_POEM_PANEL_DEPTH_STAGGER * 0.5
+              : SWAMP_POEM_PANEL_DEPTH_STAGGER * 0.5;
+          const baseX = p.offsetX ?? 0;
+          const baseY = (p.stackY ?? 0) + colBias;
+          col.position.set(baseX, baseY, baseZ);
+          col.rotation.set(0, 0, 0);
+        }
+      }
     }
 
     if (
@@ -835,16 +955,73 @@ export default function SwampMollyPoemRebuild({
       const eligible = poemRevealEligibleRef.current;
       finalPanelOpacity = eligible ? revealSmoothedRef.current * discoveryFadeOpacity : 0;
       if (lifecycle === 'idle') {
-        for (const m of panelMatRefs.current) {
-          if (m) m.opacity = finalPanelOpacity;
-        }
-        const flickMat = flickerPhraseMatRef.current;
-        if (flickMat) {
-          const fMul =
-            SWAMP_POEM_FLICKER_ENABLED && layoutMeta.flickerPhraseFound
-              ? flickPhraseMultRef.current
-              : 1;
-          flickMat.opacity = finalPanelOpacity * fMul;
+        const panelCount = panelMatRefs.current.length;
+        if (motionExperimentActive && SWAMP_POEM_SHIMMER_ENABLED && effShimmerAmount > 0) {
+          for (let i = 0; i < panelCount; i += 1) {
+            const m = panelMatRefs.current[i];
+            if (!m) continue;
+            const phaseBase = i === 0 ? SWAMP_POEM_SHIMMER_PHASE_LEFT : SWAMP_POEM_SHIMMER_PHASE_RIGHT;
+            const phase = elapsed * SWAMP_POEM_SHIMMER_SPEED + phaseBase;
+            let opacityMul = 1;
+            let bright = 1;
+            let aqua = 0;
+            const wBright =
+              0.52 * Math.sin(phase * 1.03) +
+              0.33 * Math.sin(phase * 0.57 + 1.4) +
+              0.15 * Math.sin(phase * 0.33 + 2.1);
+            bright = THREE.MathUtils.clamp(
+              1 + effShimmerAmount * wBright,
+              1 - effShimmerAmount * 0.68,
+              1 + effShimmerAmount * 0.68,
+            );
+            aqua = effShimmerAmount * 0.09 * Math.sin(phase * 0.74 + 0.35);
+            const wOp = Math.sin(elapsed * SWAMP_POEM_SHIMMER_SPEED * 0.31 + 0.4 + i * 0.55);
+            const breath = (0.5 + 0.5 * wOp) * 0.45;
+            opacityMul = SWAMP_POEM_SHIMMER_OPACITY_FLOOR + (1 - SWAMP_POEM_SHIMMER_OPACITY_FLOOR) * breath;
+            _panelShimmerColor.setRGB(bright + aqua, bright, bright + aqua * 0.65);
+            m.color.copy(_panelShimmerColor);
+            m.opacity = finalPanelOpacity * opacityMul;
+          }
+          const flickMat = flickerPhraseMatRef.current;
+          if (flickMat) {
+            const host = flickerHostPlaneIndex >= 0 ? flickerHostPlaneIndex : 0;
+            const flickPhaseBase =
+              host === 0 ? SWAMP_POEM_SHIMMER_PHASE_LEFT : SWAMP_POEM_SHIMMER_PHASE_RIGHT;
+            const phase = elapsed * SWAMP_POEM_SHIMMER_SPEED + flickPhaseBase;
+            const wBright =
+              0.52 * Math.sin(phase * 1.03) +
+              0.33 * Math.sin(phase * 0.57 + 1.4) +
+              0.15 * Math.sin(phase * 0.33 + 2.1);
+            const bright = THREE.MathUtils.clamp(
+              1 + effShimmerAmount * wBright,
+              1 - effShimmerAmount * 0.68,
+              1 + effShimmerAmount * 0.68,
+            );
+            const aqua = effShimmerAmount * 0.09 * Math.sin(phase * 0.74 + 0.35);
+            _flickerShimmerColor.setRGB(bright + aqua, bright, bright + aqua * 0.65);
+            flickMat.color.copy(_flickerShimmerColor);
+            const fMul =
+              SWAMP_POEM_FLICKER_ENABLED && layoutMeta.flickerPhraseFound
+                ? flickPhraseMultRef.current
+                : 1;
+            flickMat.opacity = finalPanelOpacity * fMul;
+          }
+        } else {
+          for (let i = 0; i < panelCount; i += 1) {
+            const m = panelMatRefs.current[i];
+            if (!m) continue;
+            m.color.setRGB(1, 1, 1);
+            m.opacity = finalPanelOpacity;
+          }
+          const flickMat = flickerPhraseMatRef.current;
+          if (flickMat) {
+            flickMat.color.setRGB(1, 1, 1);
+            const fMul =
+              SWAMP_POEM_FLICKER_ENABLED && layoutMeta.flickerPhraseFound
+                ? flickPhraseMultRef.current
+                : 1;
+            flickMat.opacity = finalPanelOpacity * fMul;
+          }
         }
       }
 
@@ -952,6 +1129,26 @@ export default function SwampMollyPoemRebuild({
           particleCount: particleStateRef.current?.length ?? 0,
           pointerStartsDissipation: false,
           clickToDissipateEnabled: false,
+          poemMotionExperiment: {
+            SWAMP_POEM_ENABLE_FLOAT_SHIMMER,
+            aqpoemmotiontest: AQ_POEM_MOTION_TEST,
+            motionExperimentActive,
+            floatExperimentActive,
+            shimmerExperimentActive,
+            visualtestActive: false,
+            panelOpacitySource:
+              motionExperimentActive && SWAMP_POEM_SHIMMER_ENABLED && effShimmerAmount > 0
+                ? 'reveal-plus-shimmer'
+                : 'reveal-only',
+            groupMotionActive:
+              motionExperimentActive && SWAMP_POEM_FLOAT_ENABLED && !floatFrozenRef.current,
+            panelMotionActive:
+              motionExperimentActive &&
+              SWAMP_POEM_PANEL_IDLE_MOTION_ENABLED &&
+              !panelFloatFrozenRef.current,
+            aqpoemfloattest: AQ_POEM_FLOAT_TEST,
+            aqpoemfloattestHasEffect: motionExperimentActive && AQ_POEM_FLOAT_TEST,
+          },
           poemFloatEnabled: SWAMP_POEM_FLOAT_ENABLED,
           cameraLocalInFloatSpace: (() => {
             if (!floatGrp) return null;
@@ -1012,6 +1209,89 @@ export default function SwampMollyPoemRebuild({
               ? flickPhraseMultRef.current
               : 1),
         });
+        if (AQ_POEM_DEBUG && floatGrp && motionExperimentActive) {
+          floatGrp.updateMatrixWorld(true);
+          const phaseProof = elapsed * SWAMP_POEM_SHIMMER_SPEED + SWAMP_POEM_SHIMMER_PHASE_LEFT;
+          let wBrightProof = 0;
+          let brightProof = 1;
+          if (SWAMP_POEM_SHIMMER_ENABLED && effShimmerAmount > 0) {
+            wBrightProof =
+              0.52 * Math.sin(phaseProof * 1.03) +
+              0.33 * Math.sin(phaseProof * 0.57 + 1.4) +
+              0.15 * Math.sin(phaseProof * 0.33 + 2.1);
+            brightProof = THREE.MathUtils.clamp(
+              1 + effShimmerAmount * wBrightProof,
+              1 - effShimmerAmount * 0.68,
+              1 + effShimmerAmount * 0.68,
+            );
+          }
+          console.info('[aqpoemdebug] poemMotionProof', {
+            motionExperimentActive,
+            SWAMP_POEM_ENABLE_FLOAT_SHIMMER,
+            AQ_POEM_MOTION_TEST,
+            SWAMP_POEM_FLOAT_BOB_AMOUNT,
+            SWAMP_POEM_FLOAT_DRIFT_AMOUNT,
+            SWAMP_POEM_FLOAT_YAW_AMOUNT,
+            SWAMP_POEM_FLOAT_PITCH_AMOUNT,
+            SWAMP_POEM_FLOAT_ROLL_AMOUNT,
+            SWAMP_POEM_FLOAT_SPEED,
+            AQ_POEM_FLOAT_TEST,
+            floatAmplitudeMultiplier_fromFloattest: floatTestMul,
+            shimmerAmountMultiplier_fromFloattest: shimmerTestMul,
+            SWAMP_POEM_SHIMMER_AMOUNT,
+            effectiveShimmerAmount_runtime: effShimmerAmount,
+            SWAMP_POEM_REBUILD_STATIC_ONLY,
+            lifecycle,
+            floatFrozen: floatFrozenRef.current,
+            columnIdleMotionSkippedBecauseFrozen: panelFloatFrozenRef.current,
+            columnIdleMotionSkippedBecauseDisabled: !SWAMP_POEM_PANEL_IDLE_MOTION_ENABLED,
+            note_staticOnlyDoesNotSkipColumnMotion: true,
+            floatGroupLocalPosition: floatGrp.position.toArray(),
+            floatGroupLocalRotationEulerRad: [
+              floatGrp.rotation.x,
+              floatGrp.rotation.y,
+              floatGrp.rotation.z,
+            ],
+            floatDeltaFromRest_positionLength: floatGrp.position.length(),
+            floatDeltaFromRest_rotationL2Rad: Math.sqrt(
+              floatGrp.rotation.x ** 2 + floatGrp.rotation.y ** 2 + floatGrp.rotation.z ** 2,
+            ),
+            columnGroupPositionsFloatLocal: panels.map((_, pi) => {
+              const c = columnGroupRefs.current[pi];
+              return c ? c.position.toArray() : null;
+            }),
+            columnGroupRotationZ: panels.map((_, pi) => {
+              const c = columnGroupRefs.current[pi];
+              return c ? c.rotation.z : null;
+            }),
+            columnParentIsFloatGroup: panels.map((_, pi) => {
+              const c = columnGroupRefs.current[pi];
+              return c ? c.parent === floatGrp : null;
+            }),
+            floatGroupParentIsAnchor: floatGrp.parent === anchorRef.current,
+            shimmerPanel0ComputedBrightnessSample: brightProof,
+            shimmerPanel0WBrightSample: wBrightProof,
+            panelMaterials: panelMatRefs.current.map((m, i) =>
+              m
+                ? {
+                    planeIndex: i,
+                    color: { r: m.color.r, g: m.color.g, b: m.color.b },
+                    opacity: m.opacity,
+                  }
+                : { planeIndex: i, missing: true },
+            ),
+            flickerMaterial: flickerPhraseMatRef.current
+              ? {
+                  color: {
+                    r: flickerPhraseMatRef.current.color.r,
+                    g: flickerPhraseMatRef.current.color.g,
+                    b: flickerPhraseMatRef.current.color.b,
+                  },
+                  opacity: flickerPhraseMatRef.current.opacity,
+                }
+              : null,
+          });
+        }
       }
     }
 
@@ -1099,16 +1379,26 @@ export default function SwampMollyPoemRebuild({
       if (freezeAlignHold) {
         const pOp = THREE.MathUtils.clamp(0.45 * latch, 0, 1);
         for (const m of panelMatRefs.current) {
-          if (m) m.opacity = pOp;
-        }
-        const fm = flickerPhraseMatRef.current;
-        if (fm) fm.opacity = pOp;
-      } else {
-        for (const m of panelMatRefs.current) {
-          if (m) m.opacity = THREE.MathUtils.clamp(latch * panelFactor, 0, 1);
+          if (m) {
+            m.color.setRGB(1, 1, 1);
+            m.opacity = pOp;
+          }
         }
         const fm = flickerPhraseMatRef.current;
         if (fm) {
+          fm.color.setRGB(1, 1, 1);
+          fm.opacity = pOp;
+        }
+      } else {
+        for (const m of panelMatRefs.current) {
+          if (m) {
+            m.color.setRGB(1, 1, 1);
+            m.opacity = THREE.MathUtils.clamp(latch * panelFactor, 0, 1);
+          }
+        }
+        const fm = flickerPhraseMatRef.current;
+        if (fm) {
+          fm.color.setRGB(1, 1, 1);
           fm.opacity = THREE.MathUtils.clamp(latch * panelFactor, 0, 1);
         }
       }
@@ -1355,7 +1645,7 @@ export default function SwampMollyPoemRebuild({
       frustumCulled={false}
     >
       <group ref={floatGroupRef}>
-        {AQ_POEM_DEBUG && (
+        {AQ_POEM_DEBUG_HELPERS && (
           <group>
             <axesHelper args={[2.4]} raycast={() => null} />
             <mesh raycast={() => null}>

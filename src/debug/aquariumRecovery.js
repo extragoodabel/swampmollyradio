@@ -22,7 +22,9 @@
  * - `?aqcarinfodebug=1` — rusty car Girl Noise Press: click + reveal state + sign mount (console).
  * - `?aqcompaniondebug=1` — companion schools: mount diagnostics + slightly boosted visibility.
  * - `?aqtouchdebug=1` — CameraRig: touch pinch/pan / rotate gesture diagnostics (console).
- * - `?aqpoemdebug=1` — Swamp Molly poem rebuild: mount flags + trigger/heartbeat + wireframe helpers (console).
+ * - `?aqpoemdebug=1` — Swamp Molly poem rebuild: 3D wireframe/axes/trigger helpers + console diagnostics. (`VITE_AQ_POEM_DEBUG=1` alone logs only — no helper meshes.)
+ * - `?aqpoemmotiontest=1` — Swamp Molly poem rebuild only: enable float/shimmer/panel-motion experiment (`SWAMP_POEM_ENABLE_FLOAT_SHIMMER` must also be true in source).
+ * - `?aqpoemfloattest=1` — With motion experiment active only: 4× motion + 3× shimmer (no effect unless motion experiment is on).
  * - `?aqpoemfreeze=1` — Swamp Molly poem dissipation: freeze at end of panel/particle handoff for alignment inspection (requires trigger + debug visuals optional via aqpoemdebug).
  * - `?aqpoemfreezeplain=1` — With freeze/debug: particle tint off (white multiplier) so overlaid letters match poem fill for overlap checks.
  * - `?aqnotransition=1` — skip underwater reveal + world-switch murk (debug).
@@ -106,10 +108,15 @@ export const AQ_TOUCH_DEBUG =
   params.has('aqtouchdebug') ||
   import.meta.env.VITE_AQ_TOUCH_DEBUG === '1';
 
-/** Swamp Molly poem: placement + dissipation + frustum diagnostics (`?aqpoemdebug=1`). */
+/**
+ * Poem rebuild / legacy poem: visible rigging (axes, bounds, trigger wireframes). URL `?aqpoemdebug=1` only —
+ * avoids surprise wireframes when using `VITE_AQ_POEM_DEBUG=1` for console-only diagnostics.
+ */
+export const AQ_POEM_DEBUG_HELPERS = params.has('aqpoemdebug');
+
+/** Swamp Molly poem: placement + dissipation diagnostics in console (`?aqpoemdebug=1` or `VITE_AQ_POEM_DEBUG=1`). */
 export const AQ_POEM_DEBUG =
-  params.has('aqpoemdebug') ||
-  import.meta.env.VITE_AQ_POEM_DEBUG === '1';
+  AQ_POEM_DEBUG_HELPERS || import.meta.env.VITE_AQ_POEM_DEBUG === '1';
 
 /** Swamp Molly poem: freeze dissipation after handoff for column/particle alignment checks (`?aqpoemfreeze=1`). */
 export const AQ_POEM_FREEZE =
@@ -118,6 +125,12 @@ export const AQ_POEM_FREEZE =
 /** With aqpoemfreeze + aqpoemdebug: disable column tint on particles for pure overlap vs panel (`?aqpoemfreezeplain=1`). */
 export const AQ_POEM_FREEZE_PLAIN =
   params.has('aqpoemfreezeplain') || import.meta.env.VITE_AQ_POEM_FREEZE_PLAIN === '1';
+
+/** Swamp Molly poem rebuild: opt-in float/shimmer/panel experiment (`?aqpoemmotiontest=1` + `SWAMP_POEM_ENABLE_FLOAT_SHIMMER`). */
+export const AQ_POEM_MOTION_TEST = params.has('aqpoemmotiontest');
+
+/** Swamp Molly poem rebuild: exaggerated motion when experiment is active (`?aqpoemfloattest=1`; no effect without motion experiment). */
+export const AQ_POEM_FLOAT_TEST = params.has('aqpoemfloattest');
 
 /**
  * Verbose theme click / persistence logging (also enabled whenever AQ_THEME_DEBUG is on).

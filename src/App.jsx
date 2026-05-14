@@ -29,6 +29,20 @@ import {
   subscribeCameraAway,
 } from './scene/cameraReturnBridge.js';
 
+/** Primary pointer is coarse (touch) — show touch-oriented movement hints. */
+function usePreferTouchMovementHints() {
+  const [preferTouchHints, setPreferTouchHints] = useState(false);
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const mq = window.matchMedia('(pointer: coarse)');
+    const apply = () => setPreferTouchHints(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+  return preferTouchHints;
+}
+
 /** Lives under `RadioProvider` so reset can pause playback without lifting hooks. */
 function OverlayHintColumn({ hint, showReset }) {
   const { pause } = useRadio();
@@ -109,6 +123,9 @@ function AquariumCanvasTree({ sceneGeneration, onSceneFatal }) {
 
 function ThemedShell() {
   const { theme, themeId } = useTheme();
+  const preferTouchMovementHints = usePreferTouchMovementHints();
+  const overlayMovementHint =
+    preferTouchMovementHints && theme.hintMobile ? theme.hintMobile : theme.hint;
   const [sceneGeneration, setSceneGeneration] = useState(0);
   const sceneFailureAttemptsRef = useRef(0);
   const [sceneCrashReport, setSceneCrashReport] = useState(null);
@@ -377,7 +394,7 @@ function ThemedShell() {
         <div className="overlay__title">{theme.overlayLabel}</div>
         <div className="overlay__bottom">
           <ThemeModeControl />
-          <OverlayHintColumn hint={theme.hint} showReset={cameraAwayFromStart} />
+          <OverlayHintColumn hint={overlayMovementHint} showReset={cameraAwayFromStart} />
         </div>
       </div>
       <RadioOverlay />

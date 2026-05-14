@@ -6,6 +6,6 @@ export const USE_SWAMP_POEM_REBUILD = true;
 
 /**
  * When true: only static canvas planes (no trigger volume or dissipation).
- * False: swim-through AABB triggers letter dissipation only (no pointer/click path).
+ * Visual float / shimmer / column idle motion still run; dissipation and swim-through stay disabled.
  */
 export const SWAMP_POEM_REBUILD_STATIC_ONLY = false;

@@ -8,7 +8,6 @@ import {
   SWAMP_POEM_LINE_HEIGHT_MUL,
   SWAMP_POEM_PAD_X,
   SWAMP_POEM_PAD_Y,
-  SWAMP_POEM_PANEL_DEPTH_STAGGER,
   SWAMP_POEM_PANEL_Y_BIAS,
   SWAMP_POEM_PIXEL_TO_WORLD,
   SWAMP_POEM_REBUILD_FONT_MATCHES,
@@ -17,6 +16,27 @@ import {
 import { typographyFillHex } from './typographyPalette.js';
 
 const TAB_STOP_PX = 52;
+
+/**
+ * Luminous underwater ink: pale aqua halo + depth shadow, then crisp core (caller sets `fillStyle`).
+ * @param {CanvasRenderingContext2D} ctx
+ */
+function poemInkGlowFillText(ctx, ch, x, y) {
+  ctx.shadowColor = 'rgba(105, 188, 175, 0.48)';
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetX = 0.4;
+  ctx.shadowOffsetY = 1.0;
+  ctx.fillText(ch, x, y);
+  ctx.shadowColor = 'rgba(14, 48, 42, 0.55)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetX = 0.95;
+  ctx.shadowOffsetY = 1.4;
+  ctx.fillText(ch, x, y);
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.fillText(ch, x, y);
+}
 
 /**
  * Draw runs for a poem line; only the Hackles attribution uses mixed styles
@@ -119,7 +139,7 @@ function drawRunsWithMetricsFromX(
           italic: run.italic,
         });
       }
-      ctx.fillText(ch, x, y);
+      poemInkGlowFillText(ctx, ch, x, y);
       x += w;
     }
   }
@@ -239,10 +259,6 @@ function rasterizePhraseStripTexture(phrase, fontPx, murkiness, typographyTint) 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.textBaseline = 'middle';
   const ky = padY + lineH * 0.5;
-  ctx.shadowColor = 'rgba(8, 32, 28, 0.55)';
-  ctx.shadowBlur = 3.5;
-  ctx.shadowOffsetX = 0.8;
-  ctx.shadowOffsetY = 1.1;
   ctx.fillStyle = fillHex;
   drawRunsWithMetricsFromX(
     ctx,
@@ -257,7 +273,6 @@ function rasterizePhraseStripTexture(phrase, fontPx, murkiness, typographyTint) 
     [],
     TAB_STOP_PX,
   );
-  ctx.shadowBlur = 0;
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
@@ -452,10 +467,6 @@ function rasterizeBlock(opts) {
 
   for (let li = 0; li < lines.length; li += 1) {
     const line = lines[li];
-    ctx.shadowColor = 'rgba(8, 32, 28, 0.55)';
-    ctx.shadowBlur = 3.5;
-    ctx.shadowOffsetX = 0.8;
-    ctx.shadowOffsetY = 1.1;
     ctx.fillStyle = fillHex;
 
     if (flickerSplit && li === flickerLineIndex) {
@@ -506,9 +517,6 @@ function rasterizeBlock(opts) {
         TAB_STOP_PX,
       );
     }
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
     ky += lineH;
   }
 

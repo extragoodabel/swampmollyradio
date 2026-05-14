@@ -18,7 +18,7 @@ import {
   typographyFillHex,
   typographyHighlightColor,
 } from './typographyPalette.js';
-import { AQ_POEM_DEBUG, AQ_CAR_INFO_DEBUG } from '../debug/aquariumRecovery.js';
+import { AQ_POEM_DEBUG, AQ_POEM_DEBUG_HELPERS, AQ_CAR_INFO_DEBUG } from '../debug/aquariumRecovery.js';
 import { fireRustyCarClickFromDelegate } from './rustyCarClickBridge.js';
 
 const TAB_COL_WIDTH = 4;
@@ -1044,7 +1044,7 @@ export function SwampFloatingWaterWords({
       rotation={rotation}
       frustumCulled={false}
     >
-      {AQ_POEM_DEBUG && dissipationExplicitBox ? (
+      {AQ_POEM_DEBUG_HELPERS && dissipationExplicitBox ? (
         <mesh
           position={[
             dissipationExplicitBox.center?.[0] ?? 0,

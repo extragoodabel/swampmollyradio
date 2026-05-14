@@ -244,15 +244,50 @@ export const SWAMP_POEM_LETTER_EARLY_DRIFT_RAMP_SEC = 2.75;
 export const SWAMP_POEM_LETTER_EARLY_SINK_RAMP_SEC = 1.2;
 
 /**
+ * Master gate for poem float / shimmer / per-column idle motion. Ships false: normal builds show a stable poem.
+ * With `?aqpoemmotiontest=1` in the URL, set this to true locally to exercise the experiment.
+ */
+export const SWAMP_POEM_ENABLE_FLOAT_SHIMMER = false;
+
+/**
  * Gentle panel-level motion (anchor world position stays fixed for distance reveal).
  * Inner float group applies bob / drift / euler breathing in {@link SwampMollyPoemRebuild}.
+ * Used only when {@link SWAMP_POEM_ENABLE_FLOAT_SHIMMER} and `?aqpoemmotiontest=1`.
  */
 export const SWAMP_POEM_FLOAT_ENABLED = true;
-export const SWAMP_POEM_FLOAT_BOB_AMOUNT = 0.06;
-export const SWAMP_POEM_FLOAT_DRIFT_AMOUNT = 0.04;
-export const SWAMP_POEM_FLOAT_ROTATION_AMOUNT = 0.006;
+/** Vertical bob amplitude (meters, float-local). */
+export const SWAMP_POEM_FLOAT_BOB_AMOUNT = 0.16;
+/** Horizontal drift amplitude (meters). */
+export const SWAMP_POEM_FLOAT_DRIFT_AMOUNT = 0.09;
+/** Multiplier on elapsed time inside float sines — lower = slower, dreamier motion. */
+export const SWAMP_POEM_FLOAT_SPEED = 0.55;
+export const SWAMP_POEM_FLOAT_YAW_AMOUNT = 0.010;
+export const SWAMP_POEM_FLOAT_PITCH_AMOUNT = 0.006;
+export const SWAMP_POEM_FLOAT_ROLL_AMOUNT = 0.007;
 /** Z separation between the two column planes (world units, float-local space). */
-export const SWAMP_POEM_PANEL_DEPTH_STAGGER = 0.028;
+export const SWAMP_POEM_PANEL_DEPTH_STAGGER = 0.042;
+
+/** Idle underwater light: color/brightness wobble + mild opacity breathing (high floor). */
+export const SWAMP_POEM_SHIMMER_ENABLED = true;
+export const SWAMP_POEM_SHIMMER_AMOUNT = 0.14;
+export const SWAMP_POEM_SHIMMER_SPEED = 0.65;
+export const SWAMP_POEM_SHIMMER_OPACITY_FLOOR = 0.92;
+/** Phase offsets (radians) so columns do not pulse in lockstep. */
+export const SWAMP_POEM_SHIMMER_PHASE_LEFT = 0;
+export const SWAMP_POEM_SHIMMER_PHASE_RIGHT = 1.85;
+
+/**
+ * Tiny motion on each column group (phase-shifted) so the poem is not one rigid slab.
+ * Latched with float on dissipation start; particles use column matrixWorld at trigger time.
+ */
+export const SWAMP_POEM_PANEL_IDLE_MOTION_ENABLED = true;
+export const SWAMP_POEM_PANEL_BOB_Y_AMOUNT = 0.034;
+export const SWAMP_POEM_PANEL_DRIFT_Z_AMOUNT = 0.024;
+export const SWAMP_POEM_PANEL_DRIFT_X_AMOUNT = 0.018;
+export const SWAMP_POEM_PANEL_ROT_Z_AMOUNT = 0.0024;
+export const SWAMP_POEM_PANEL_MOTION_SPEED = 0.5;
+export const SWAMP_POEM_PANEL_MOTION_PHASE_LEFT = 0;
+export const SWAMP_POEM_PANEL_MOTION_PHASE_RIGHT = 1.73;
 /** Tiny static vertical bias: left column slightly up, right slightly down (readability). */
 export const SWAMP_POEM_PANEL_Y_BIAS = 0.007;
 
